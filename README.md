@@ -17,8 +17,12 @@ records latency and message counts but must stay free of backend crates.
 
 ```toml
 [dependencies]
-observability = { git = "https://github.com/polaris-trade/observability", tag = "observability-v0.2.0" }
+observability = { git = "https://github.com/0x67/observability", tag = "observability-v0.2.2" }
 ```
+
+Using both crates? Pin both to the same tag, the newest one of either component. Two tags
+on one git url check out two copies of the repository, and `observability-core` types from
+one copy do not match the other.
 
 ```rust
 use std::time::Duration;
@@ -120,7 +124,7 @@ alone.
 ## Workspace
 
 A virtual Cargo workspace (`members = ["crates/*"]`) with two members. It is one git repo,
-self-sufficient when cloned alone, and part of the wider `polaris-trade` multi-repo workspace.
+self-sufficient when cloned alone.
 
 - MSRV / edition: Rust 1.96.1, edition 2024 (pinned in `rust-toolchain.toml` and
   `[workspace.package]`).
@@ -138,6 +142,6 @@ cargo hack --feature-powerset --depth 2 check   # feature-combo build guard (mir
 lat check                               # docs graph integrity
 ```
 
-CI runs the shared `polaris-trade/ci` reusable Rust workflow plus a feature-matrix job that
+CI runs the shared `0x67/ci` reusable Rust workflows plus a feature-matrix job that
 powersets both crates' features and asserts `observability-core` never pulls in
 `opentelemetry` or `tracing-subscriber`.
