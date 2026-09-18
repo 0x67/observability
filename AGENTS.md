@@ -190,3 +190,13 @@ A test must be able to fail from a project bug. Never write:
 Keep (contract gates, not useless): wire/on-disk layout pins (size, alignment, discriminant, padding, format magic), codegen drift gates, determinism/replay gates, `Display` tests with a documented ops/log-matching rationale.
 
 Review rule: any new test matching a banned class = NEEDS_REVISION. Relay packets for test-writing subagents must include this ban list.
+
+# Code Simplicity Discipline (MANDATORY pre-write gate)
+
+Apply before writing, not during review.
+
+- No overcomplicated or overlong code. Smallest change that meets the ask. No speculative abstraction: no trait for one impl, generic for one type, builder for two fields, config knob for one value, indirection layer "for later". One concern per fn; if it needs section comments, split it. Plain `match`/`if`/iterator chain beats layered helpers.
+- No backwards compatibility unless the user asks. Rename or change the signature and fix every call site. No `#[deprecated]` shims, `_v2` twins, old-name re-exports, dual code paths, "legacy" flags, or migration adapters. Breaking inside the workspace is fine; git history holds the old shape.
+- No slop, no anti-patterns. Slop: dead code, unused params/imports, `#[allow]` to silence instead of fix, `.clone()` to dodge a borrow, `unwrap()`/`expect()` on a lib path, stringly-typed state, bool-param flags, `Box<dyn>` where a generic fits, newtype with no invariant, re-validating already-typed input, comment narrating code, TODO placeholder instead of finishing, catch-all error swallow. Delete on sight in touched code.
+
+Review rule: any of the above in a diff = NEEDS_REVISION. Relay packets carry this section.
