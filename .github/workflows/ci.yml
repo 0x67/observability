@@ -7,7 +7,7 @@ on:
 
 jobs:
   rust:
-    uses: polaris-trade/ci/.github/workflows/rust-ci.yml@main
+    uses: 0x67/ci/.github/workflows/rust-ci.yml@main
 
   # guard feature-flag combos build + observability-core stays free of
   # opentelemetry/tracing-subscriber (heavy backends belong in leaf crate only).

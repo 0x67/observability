@@ -1,6 +1,6 @@
 # observability
 
-Visibility: PUBLIC (OSS). No runtime dep on, dev-dep on, or mention of PRIVATE crates. See root AGENTS.md#OSS/Private module discipline.
+Visibility: PUBLIC (OSS). No runtime dep on, dev-dep on, or mention of PRIVATE crates.
 
 Two-crate observability lib, reusable by any Rust project. `observability-core` is the runtime metrics gate plus hot-path helpers (deps: `metrics`, `hdrhistogram`, optional `tokio`). `observability` wires tracing and metrics backends: subscriber pipeline, metrics recorder, shared OTLP config. Heavy deps are feature-gated, default-on.
 
@@ -125,7 +125,7 @@ The `cfg_attr(not(test), ...)` form leaves unit-test code free to print. Restric
 3. `lat check` — must pass
 4. `rg -n 'REQ-|TASK-|AC-' -g '*.rs' -g '!**/target/**'` — must be empty
 5. `rg -n '—' -g '*.rs' -g '!**/target/**'` — must be empty
-6. Update spec progress in `specs/<task-slug>/tasks.md` (module-local) or `polaris-trade/specs/<task-slug>/tasks.md` (cross-module) if any task changed state — see `Spec-driven specs/ location` below
+6. Update spec progress in `specs/<task-slug>/tasks.md` if any task changed state
 7. Update `lat.md/` if any module/type/function was added, removed, or renamed
 
 If any step fails: fix it. Do NOT skip. Do NOT report done until all pass.
@@ -165,7 +165,7 @@ When writing new tests:
 
 # Code Growth Discipline (MANDATORY pre-write gate)
 
-Workspace-wide standard (mirrors root AGENTS.md and the operator's global config). Apply before writing, not during review.
+Apply before writing, not during review.
 
 - New code: sketch module layout first. One concern per file; name the seam (trait impl, venue/channel, config vs logic). Projected >600 non-test LOC or a second concern: start as mod dir, never "split later".
 - Feature work: if the result would be too coupled or push a file past ~800 non-test LOC, land a split-first refactor commit (pure moves + `pub use` re-exports, gates green, zero behavior diff), then implement. Two commits, never one mixed.
