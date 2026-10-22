@@ -27,7 +27,7 @@ tracing-bunyan-formatter = "0.3"
 # backend: opentelemetry 0.31
 tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "http-proto"] }
 opentelemetry-appender-tracing = "0.31"
 # backend: metrics exporters
