@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 //! Tracing + metrics backend wiring over the `observability-core` gate.
 //!
 //! Two independent subsystems that share nothing at runtime except one `OtlpConfig`:

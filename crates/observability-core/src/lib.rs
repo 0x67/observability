@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr))]
 //! Runtime metrics gate plus hot-path telemetry helpers.
 //!
 //! Dependency leaf: `metrics` facade + `hdrhistogram` (+ optional `tokio` flusher) only.

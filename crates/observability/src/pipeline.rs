@@ -97,18 +97,18 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
                                 layers.push(bridge.with_filter(env_filter(level)).boxed());
                                 logger_provider = Some(provider);
                             }
-                            Err(e) => eprintln!(
-                                "observability: otlp log exporter build failed, log sink skipped: {e}"
-                            ),
+                            Err(e) => pre_init_notice(format_args!(
+                                "otlp log exporter build failed, log sink skipped: {e}"
+                            )),
                         },
-                        None => {
-                            eprintln!("observability: otlp log sink needs an otlp config, skipping")
-                        }
+                        None => pre_init_notice(format_args!(
+                            "otlp log sink needs an otlp config, skipping"
+                        )),
                     }
                     #[cfg(not(feature = "otel-logs"))]
-                    eprintln!(
-                        "observability: otlp log sink configured but `otel-logs` feature off, skipping"
-                    );
+                    pre_init_notice(format_args!(
+                        "otlp log sink configured but `otel-logs` feature off, skipping"
+                    ));
                 }
             }
         }
@@ -126,9 +126,9 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
                 layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
                 tracer_provider = Some(provider);
             }
-            Err(e) => {
-                eprintln!("observability: otlp trace exporter build failed, tracing disabled: {e}")
-            }
+            Err(e) => pre_init_notice(format_args!(
+                "otlp trace exporter build failed, tracing disabled: {e}"
+            )),
         }
     }
 
@@ -144,6 +144,14 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
         #[cfg(feature = "otel-logs")]
         logger_provider,
     })
+}
+
+#[expect(
+    clippy::print_stderr,
+    reason = "notices print before this crate's subscriber exists, so stderr is the only sink"
+)]
+fn pre_init_notice(msg: std::fmt::Arguments<'_>) {
+    eprintln!("observability: {msg}");
 }
 
 /// Build a sink `EnvFilter`. Precedence: valid `RUST_LOG` > `level` arg > `"info"`.
@@ -204,7 +212,9 @@ where
             }
             #[cfg(not(feature = "bunyan"))]
             {
-                eprintln!("observability: bunyan format needs `bunyan` feature, using json");
+                pre_init_notice(format_args!(
+                    "bunyan format needs `bunyan` feature, using json"
+                ));
                 tracing_subscriber::fmt::layer()
                     .json()
                     .with_writer(writer)
