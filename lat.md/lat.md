@@ -18,7 +18,7 @@ Each layer in the registry has a filter. One unfiltered layer would leave the re
 
 `ObsGuard`, [[crates/observability/src/pipeline/guard.rs#PipelineGuard]], and `MetricsGuard` are `#[must_use]`. A statement like `init_pipeline(cfg)?;` drops the guard at once, which stops the log writers and turns the metrics gate off, so the lint makes that mistake a compile-time warning.
 
-[[crates/observability/src/metrics.rs#init_metrics]] installs the `metrics`-facade global recorder (Prometheus pull or OTLP push) and flips the `observability-core` gate on success only; any error path leaves the gate untouched. It runs independently of the pipeline: `init` calls `init_pipeline` first (so a metrics failure is itself logged), and a metrics install failure downgrades to a `tracing::warn!` plus `metrics: None`, never taking down logging or tracing.
+[[crates/observability/src/metrics/mod.rs#init_metrics]] installs the `metrics`-facade global recorder (Prometheus pull or OTLP push) and flips the `observability-core` gate on success only; any error path leaves the gate untouched. It runs independently of the pipeline: `init` calls `init_pipeline` first (so a metrics failure is itself logged), and a metrics install failure downgrades to a `tracing::warn!` plus `metrics: None`, never taking down logging or tracing.
 
 The subsystems are coupled at runtime in two places. One is the `OtlpConfig` value `init` clones out of `PipelineConfig` before calling `init_pipeline`, then hands to `init_metrics` alongside the service name. The other is the export runtime, which both get from `ExportRuntime::shared`.
 
