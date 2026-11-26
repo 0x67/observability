@@ -39,8 +39,8 @@ pub const SAMPLE_1_IN_8192: u64;               // mask = 8192 - 1
 ```
 
 - `timer` reads the clock only when the gate is on; the `None` variant records nothing on drop.
-- `record_latency_ns` lands in a thread-local `hdrhistogram::Histogram` bounded 1ns..60s at 3
-  significant figures. It uses `saturating_record`, so a tail spike clamps into range instead of
+- `record_latency_ns` lands in a thread-local `hdrhistogram::Histogram` bounded 1ns..60s at 2
+  significant figures: buckets about 1% wide, 30 KB per histogram. It uses `saturating_record`, so a tail spike clamps into range instead of
   panicking.
 - `should_sample` requires `mask == 2^n - 1`. It fires on a fresh thread's very first call, then
   exactly once per `mask + 1` consecutive calls.

@@ -20,11 +20,12 @@ use crate::gate::metrics_enabled;
 
 const HIST_LOW_NS: u64 = 1;
 const HIST_HIGH_NS: u64 = 60_000_000_000;
-const HIST_SIGFIGS: u8 = 3;
+// buckets about 1% wide; 3,840 counts (30 KB) per histogram
+const HIST_SIGFIGS: u8 = 2;
 
 fn new_bounded_histogram() -> Histogram<u64> {
     Histogram::new_with_bounds(HIST_LOW_NS, HIST_HIGH_NS, HIST_SIGFIGS)
-        .expect("fixed bounds 1ns..60s at 3 sigfigs are always valid")
+        .expect("fixed bounds 1ns..60s at 2 sigfigs are always valid")
 }
 
 /// Recover a poisoned mutex instead of panicking. Telemetry must survive a panicked holder.
