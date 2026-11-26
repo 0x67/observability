@@ -38,12 +38,13 @@ pub struct ObsConfig {
     pub metrics: Option<MetricsConfig>,
 }
 
-/// Held for the process lifetime. Drop flushes the pipeline's OTel batches and file writers,
-/// then flips the metrics gate off.
+/// Held for the process lifetime. Drop shuts the metrics recorder down first (gate off,
+/// final metric export), then the pipeline (final span and log export, file writer flush).
 #[must_use = "dropping the guard stops the log writers and flushes the exporters; keep it alive for the process lifetime"]
 pub struct ObsGuard {
-    pub pipeline: PipelineGuard,
+    // declared first so it drops first: the log sinks still print metric shutdown warnings
     pub metrics: Option<MetricsGuard>,
+    pub pipeline: PipelineGuard,
 }
 
 /// Bring up both subsystems: pipeline first (so a metrics warning is itself logged), then
@@ -69,5 +70,5 @@ pub fn init(cfg: ObsConfig) -> Result<ObsGuard, PipelineError> {
         None => None,
     };
 
-    Ok(ObsGuard { pipeline, metrics })
+    Ok(ObsGuard { metrics, pipeline })
 }

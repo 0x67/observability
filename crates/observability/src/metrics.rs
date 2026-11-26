@@ -64,8 +64,10 @@ impl MetricsGuard {
 
     #[cfg(feature = "metrics-otel")]
     fn shutdown_otel(&self) {
-        if let Some(otel) = &self.otel {
-            let _ = otel.provider.shutdown();
+        if let Some(otel) = &self.otel
+            && let Err(error) = otel.provider.shutdown()
+        {
+            tracing::warn!(%error, "OTLP metrics provider shutdown failed");
         }
     }
 

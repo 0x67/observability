@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`.
 
-In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, and TLS export.
+In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -163,3 +163,15 @@ With `TlsRoots::CaFileOnly`, the test CA as `ca_file`, and the test client certi
 ### Export without client cert is rejected
 
 The same mocks receive nothing from a config without `client_cert`, on either transport, and dropping both guards still returns.
+
+## Guard drop
+
+Dropping `ObsGuard` inside an app runtime delivers the final span and metric without a panic, whatever the runtime flavor.
+
+### ObsGuard drop inside current_thread runtime delivers final batch
+
+Inside a current_thread runtime, `init` with gRPC tracing and gRPC metrics, a final span and counter, then dropping `ObsGuard` in the async block: the drop returns within 2 s, and the gRPC mock received the span and the counter.
+
+### ObsGuard drop inside async context delivers over HTTP
+
+The same steps on a multi-thread runtime over HTTP: the drop inside the async block does not panic, and the HTTP mock received the span and the counter.

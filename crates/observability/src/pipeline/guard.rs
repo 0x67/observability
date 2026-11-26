@@ -38,10 +38,10 @@ pub struct PipelineGuard {
 
 impl Drop for PipelineGuard {
     fn drop(&mut self) {
-        // final flush before worker guards drop; provider drop also shuts down.
+        // providers shut down while the log writers can still print their warnings
         #[cfg(feature = "otel")]
-        if let Some(otel) = &self.otel {
-            otel.force_flush();
+        if let Some(otel) = self.otel.take() {
+            otel.shutdown();
         }
     }
 }
