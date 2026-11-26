@@ -116,8 +116,7 @@ The `cfg_attr(not(test), ...)` form leaves unit-test code free to print. Restric
 
 - binary CLI product output (`main.rs` and its bin-target modules), the program's actual stdout product;
 - a binary's pre-subscriber-init usage or fatal-startup `eprintln!` (before any subscriber exists);
-- `build.rs` `cargo:` directives;
-- the observability crate's own pre-subscriber-init stderr notices (it cannot log through a subscriber it has not installed yet).
+- `build.rs` `cargo:` directives.
 
 # Post-Task Checklist (MANDATORY — ALL AGENTS, RUN BEFORE REPORTING DONE)
 
