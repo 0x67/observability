@@ -115,8 +115,9 @@ roots, the OS platform verifier, or a private CA, and optionally a client certif
 `observability-core` keeps hot-path writes thread-local. The runtime gate is one process-wide
 atomic that every thread reads with a `Relaxed` load. The gate is written rarely, which keeps
 that read in each core's cache. Latency samples land in a thread-local bounded `hdrhistogram::Histogram`, and
-message counts sit in a plain per-thread `Cell`. Both merge into shared registries only on a
-periodic tick, so a flusher on another thread only ever sees data a worker already handed off.
+message counts sit in a plain per-thread `Cell`. Both move to one shared slot per thread on a
+periodic tick or at thread exit. A flusher on another thread sees only data a worker already
+handed off, and the first drain after a thread exits frees that thread's slot.
 
 See [`lat.md/lat.md`](lat.md/lat.md) for the full design intent and the per-subsystem rationale.
 

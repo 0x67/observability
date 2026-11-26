@@ -4,7 +4,7 @@ lat:
 ---
 # Tests
 
-Behavioral test specifications for the hot-path gate, sampler, counters, and histogram merge in `observability-core`.
+Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
 In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, TLS export, and guard drop.
 
@@ -38,13 +38,49 @@ Reading via `take_count` returns the accumulated count and resets the thread-loc
 
 ## Cross-thread histogram and count aggregation
 
-`merge_local` hands a thread's local `hdrhistogram` and message count into shared per-thread registry slots; `drain_all`/`drain_count` fold every registered slot into one snapshot, clearing each slot in place.
+`merge_local` hands a thread's local `hdrhistogram` and message count to its shared slot; `drain_into` resets a caller-owned window, folds every slot into it, and returns the message count.
 
-### merge_local and drain_all aggregate across threads with clamp
+### merge_local and drain_into aggregate across threads with clamp
 
-A worker's recorded latencies, plus one sample above the 60s bound, merge via `merge_local`; `drain_all` on another thread sums them with the tail sample clamped into range.
+A worker's recorded latencies, plus one sample above the 60s bound, merge via `merge_local`; `drain_into` on another thread sums them with the tail sample clamped into range.
 
-`drain_count` returns the matching message-count sum for the same worker, proving both registries hand off together on one `merge_local` tick.
+The same drain returns the worker's message count, proving latency and count hand off together on one `merge_local` tick.
+
+### Drain resets the window before filling
+
+Ten 1,000 ns samples drain into a window. Three 2,000 ns samples then drain into the same window, which afterwards holds exactly those three and no 1,000 ns sample.
+
+## Slot retirement
+
+Each recording thread owns one shared slot; its exit hands off unmerged data and retires the slot, and the next drain removes it. These tests hold `TEST_STATE`, because the slot registry is process-wide.
+
+### Exited threads release their slots
+
+50 threads each record 1,000 ns once and merge, then exit. Their 50 slots stay registered until the next drain, which reads all 50 samples and leaves no slot behind.
+
+### Live thread keeps its slot
+
+A thread that records, merges, and stays alive keeps its slot across a drain. After it exits, the next drain removes the slot.
+
+### Exit hands off unmerged samples
+
+20 threads each record three samples and count five messages without ever merging, then exit. The next drain returns all 60 samples and 100 messages and leaves no slot behind.
+
+### Count-only thread hands off at exit
+
+A thread counts three messages and exits without recording or merging. The next drain returns a message count of 3 and leaves no slot behind.
+
+### Idle merge registers no slot
+
+A thread that never records or counts calls `merge_local` three times. No slot is registered while it runs or when it exits.
+
+### Count-only merge registers a slot
+
+A thread that counts one message and merges registers exactly one slot. The next drain returns a message count of 1 and an empty window.
+
+### Record after teardown does not panic
+
+A thread-local destructor that runs after the core's thread-local state is gone calls `record_latency_ns`, `count_msg`, and `merge_local`. Each call drops its data, and the thread joins without a panic.
 
 ## Metrics recorder guard drop behavior
 

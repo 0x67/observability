@@ -1,17 +1,16 @@
-//! Thread-local bounded histogram + cross-thread drain.
-//! Bounds 1ns..60s, 3 sig figs. saturating_record clamps tail spikes
-//! instead of dropping the sample.
+//! Per-thread latency and message counts, handed off to one shared slot per thread.
 //!
-//! Per-thread count. Hot path (count_msg) is a plain Cell, never
-//! a shared atomic. Cross-thread aggregation rides merge_local into a shared
-//! AtomicU64 slot per thread; drain_count sums them, mirroring the histogram
-//! REGISTRY hand-off so a flusher on another thread sees the real total.
+//! The hot path writes only thread-local state: a bounded `hdrhistogram::Histogram` (1ns..60s,
+//! `saturating_record` clamps a tail spike instead of dropping it) and a plain `Cell<u64>` count.
+//! `merge_local` on a worker tick, or thread exit, moves both into the thread's `Slot`, and
+//! [`drain_into`] folds every slot into a caller-owned window. A slot whose thread has exited is
+//! removed by the first drain after the exit.
 
 use std::{
     cell::{Cell, RefCell},
     sync::{
-        Arc, LazyLock, Mutex, MutexGuard,
-        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -33,15 +32,69 @@ fn lock_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
-/// One thread's histogram, shared so the flusher thread can drain it.
-type SharedHistogram = Arc<Mutex<Histogram<u64>>>;
+/// One thread's shared hand-off target. Drained by [`drain_into`], retired by its thread on exit.
+struct Slot {
+    latency_ns: Mutex<Histogram<u64>>,
+    msgs: AtomicU64,
+    retired: AtomicBool,
+}
 
-/// Merge targets, one slot per thread that has called [`merge_local`] at least once.
-static REGISTRY: LazyLock<Mutex<Vec<SharedHistogram>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+/// Every registered slot. Locked once per new thread and once per drain.
+static SLOTS: Mutex<Vec<Arc<Slot>>> = Mutex::new(Vec::new());
+
+fn register_slot() -> Arc<Slot> {
+    let slot = Arc::new(Slot {
+        latency_ns: Mutex::new(new_bounded_histogram()),
+        msgs: AtomicU64::new(0),
+        retired: AtomicBool::new(false),
+    });
+    lock_recover(&SLOTS).push(Arc::clone(&slot));
+    slot
+}
+
+struct ThreadState {
+    // None until the first sample, so a thread that only merges never allocates a histogram
+    latency_ns: Option<Histogram<u64>>,
+    slot: Option<Arc<Slot>>,
+}
 
 thread_local! {
-    static LOCAL: RefCell<Histogram<u64>> = RefCell::new(new_bounded_histogram());
-    static LOCAL_SHARED: RefCell<Option<SharedHistogram>> = const { RefCell::new(None) };
+    static LOCAL: RefCell<ThreadState> =
+        const { RefCell::new(ThreadState { latency_ns: None, slot: None }) };
+    static MSGS: Cell<u64> = const { Cell::new(0) };
+}
+
+impl ThreadState {
+    /// Move pending samples and `msgs` into this thread's slot, registering it on first use.
+    fn hand_off(&mut self, msgs: u64) {
+        let pending = self.latency_ns.as_mut().filter(|h| !h.is_empty());
+        if pending.is_none() && msgs == 0 {
+            return;
+        }
+
+        let slot = self.slot.get_or_insert_with(register_slot);
+        if let Some(local) = pending {
+            let mut shared = lock_recover(&slot.latency_ns);
+            // every histogram comes from new_bounded_histogram, so the ranges match and add cannot fail
+            let added = shared.add(&*local);
+            debug_assert!(added.is_ok(), "slot histogram rejected a same-bounds add");
+            local.reset();
+        }
+        if msgs != 0 {
+            slot.msgs.fetch_add(msgs, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Drop for ThreadState {
+    fn drop(&mut self) {
+        let msgs = MSGS.try_with(|c| c.replace(0)).unwrap_or(0);
+        self.hand_off(msgs);
+        if let Some(slot) = &self.slot {
+            // pairs with the Acquire load in drain_into
+            slot.retired.store(true, Ordering::Release);
+        }
+    }
 }
 
 /// Record one latency sample (ns) into this thread's local histogram. No-op if gate off.
@@ -50,141 +103,93 @@ pub fn record_latency_ns(ns: u64) {
     if !metrics_enabled() {
         return;
     }
-    LOCAL.with_borrow_mut(|h| h.saturating_record(ns));
+    // after thread-local teardown the sample is dropped
+    let _ = LOCAL.try_with(|state| {
+        state
+            .borrow_mut()
+            .latency_ns
+            .get_or_insert_with(new_bounded_histogram)
+            .saturating_record(ns);
+    });
 }
 
-/// Merge this thread's local histogram into its registry slot, then clear local.
-/// First call per thread registers a fresh shared histogram into [`REGISTRY`].
+/// Hand this thread's pending samples and message count to its shared slot.
+///
+/// The first hand-off with data registers the slot; a merge with nothing pending returns without
+/// touching any shared state. A thread that exits without merging hands off on exit instead.
 pub fn merge_local() {
-    let shared = LOCAL_SHARED.with_borrow_mut(|slot| {
-        slot.get_or_insert_with(|| {
-            let hist = Arc::new(Mutex::new(new_bounded_histogram()));
-            lock_recover(&REGISTRY).push(Arc::clone(&hist));
-            hist
-        })
-        .clone()
-    });
-    LOCAL.with_borrow_mut(|local| {
-        lock_recover(&shared).add(&*local).ok();
-        local.reset();
-    });
-
-    // hand off message count into this thread's shared slot, same tick
-    let count = COUNT.with(|c| c.replace(0));
-    let shared_count = COUNT_SHARED.with_borrow_mut(|slot| {
-        slot.get_or_insert_with(|| {
-            let counter = Arc::new(AtomicU64::new(0));
-            lock_recover(&COUNT_REGISTRY).push(Arc::clone(&counter));
-            counter
-        })
-        .clone()
-    });
-    shared_count.fetch_add(count, Ordering::Relaxed);
+    let msgs = MSGS.try_with(|c| c.replace(0)).unwrap_or(0);
+    // after thread-local teardown the exit hand-off already ran, so there is nothing to merge
+    let _ = LOCAL.try_with(|state| state.borrow_mut().hand_off(msgs));
 }
 
-/// Drain every registered thread histogram into one snapshot, clearing each in place.
-/// Only sees data already handed off via [`merge_local`]; a thread that never merges
-/// never contributes here.
-pub fn drain_all() -> Histogram<u64> {
-    let mut merged = new_bounded_histogram();
-    for hist in lock_recover(&REGISTRY).iter() {
-        let mut guard = lock_recover(hist);
-        merged.add(&*guard).ok();
-        guard.reset();
+/// Latency snapshot filled by [`drain_into`], in nanoseconds.
+///
+/// Built with the same bounds as every per-thread histogram, so draining into it cannot fail.
+pub struct LatencyWindow(Histogram<u64>);
+
+impl LatencyWindow {
+    /// The samples from the last [`drain_into`] call.
+    #[must_use]
+    pub fn histogram(&self) -> &Histogram<u64> {
+        &self.0
     }
-    merged
 }
 
-/// Message-count slots, one per thread that has merged at least once.
-static COUNT_REGISTRY: LazyLock<Mutex<Vec<Arc<AtomicU64>>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+impl Default for LatencyWindow {
+    fn default() -> Self {
+        Self(new_bounded_histogram())
+    }
+}
 
-thread_local! {
-    static COUNT: Cell<u64> = const { Cell::new(0) };
-    static COUNT_SHARED: RefCell<Option<Arc<AtomicU64>>> = const { RefCell::new(None) };
+/// Reset `window`, fill it from every slot, and return the drained message count.
+///
+/// Each slot is cleared as it is read. A slot whose thread has exited is removed after its final
+/// hand-off is drained. Only data already handed off is seen, never a thread's live local state.
+#[must_use = "the message count is cleared from every slot"]
+pub fn drain_into(window: &mut LatencyWindow) -> u64 {
+    window.0.reset();
+    let mut msgs = 0u64;
+    lock_recover(&SLOTS).retain(|slot| {
+        // read before draining: once true, the owner's final hand-off is complete and visible
+        let retired = slot.retired.load(Ordering::Acquire);
+        let mut shared = lock_recover(&slot.latency_ns);
+        if !shared.is_empty() {
+            let added = window.0.add(&*shared);
+            debug_assert!(added.is_ok(), "window rejected a same-bounds add");
+            shared.reset();
+        }
+        msgs = msgs.wrapping_add(slot.msgs.swap(0, Ordering::Relaxed));
+        !retired
+    });
+    msgs
 }
 
 /// Increment this thread's message counter. Wrapping: overflow wraps, never panics.
 #[inline]
 pub fn count_msg() {
-    COUNT.with(|c| c.set(c.get().wrapping_add(1)));
+    // after thread-local teardown the count is dropped
+    let _ = MSGS.try_with(|c| {
+        let n = c.get();
+        if n == 0 {
+            register_exit_hand_off();
+        }
+        c.set(n.wrapping_add(1));
+    });
+}
+
+/// Touch `LOCAL` so its destructor hands this thread's count off at exit.
+#[cold]
+fn register_exit_hand_off() {
+    let _ = LOCAL.try_with(|_| {});
 }
 
 /// Read this thread's counter, then reset it to zero. Per-thread primitive;
-/// for cross-thread totals use merge_local on the worker tick plus drain_count.
+/// for cross-thread totals use merge_local on the worker tick plus drain_into.
 #[inline]
 pub fn take_count() -> u64 {
-    COUNT.with(|c| c.replace(0))
-}
-
-/// Drain every thread's merged message count into one sum, zeroing each slot.
-/// Only sees counts handed off via merge_local, never a thread's live local count.
-pub fn drain_count() -> u64 {
-    lock_recover(&COUNT_REGISTRY)
-        .iter()
-        .map(|slot| slot.swap(0, Ordering::Relaxed))
-        .sum()
+    MSGS.try_with(|c| c.replace(0)).unwrap_or(0)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::gate::set_metrics_enabled;
-
-    /// take_count reads then resets this thread's counter; second read is zero.
-    // @lat: [[tests#Per-thread message counting#take_count reads then resets]]
-    #[test]
-    fn take_count_reads_then_resets() {
-        std::thread::spawn(|| {
-            const K: u64 = 5;
-            for _ in 0..K {
-                count_msg();
-            }
-            assert_eq!(take_count(), K);
-            assert_eq!(take_count(), 0, "second read after take must be zero");
-        })
-        .join()
-        .unwrap();
-    }
-
-    /// Cross-thread merge/drain plus saturating clamp. Sole owner of REGISTRY and
-    /// COUNT_REGISTRY in this test binary: no other test calls merge_local, drain_all,
-    /// or drain_count, else counts here would double up against process-wide state.
-    // @lat: [[tests#Cross-thread histogram and count aggregation#merge_local and drain_all aggregate across threads with clamp]]
-    #[test]
-    fn merge_local_and_drain_all_aggregate_across_threads_with_clamp() {
-        const KNOWN: [u64; 5] = [10, 1_000, 50_000, 2_000_000, 999_999_999];
-        const OVER_BOUND_NS: u64 = 70_000_000_000; // above HIST_HIGH_NS, must clamp not panic
-        const MSG_COUNT: u64 = 7;
-
-        let _state = crate::test_state();
-        set_metrics_enabled(true);
-        std::thread::spawn(|| {
-            for &ns in &KNOWN {
-                record_latency_ns(ns);
-            }
-            record_latency_ns(OVER_BOUND_NS);
-            for _ in 0..MSG_COUNT {
-                count_msg();
-            }
-            merge_local();
-        })
-        .join()
-        .unwrap();
-
-        let merged = drain_all();
-        assert_eq!(merged.len(), KNOWN.len() as u64 + 1);
-        let p50 = merged.value_at_quantile(0.5);
-        assert!((HIST_LOW_NS..=HIST_HIGH_NS).contains(&p50));
-        // hdrhistogram buckets: max() reports the occupied bucket's representative value,
-        // which can round up past the raw high bound. Compare against that bucket's own
-        // upper edge instead, still proving the clamp landed in-range, not at raw 70e9.
-        let clamp_bound = merged.highest_equivalent(HIST_HIGH_NS);
-        assert!(
-            merged.max() <= clamp_bound,
-            "saturating_record must clamp tail spike into bound, not panic or overrun"
-        );
-
-        assert_eq!(drain_count(), MSG_COUNT);
-    }
-}
+mod tests;
