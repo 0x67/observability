@@ -34,6 +34,8 @@ Message counting mirrors the same shape: a plain per-thread `Cell<u64>` on the h
 
 [[crates/observability-core/src/sample.rs#should_sample]] is a per-thread wraparound sampler (`mask` must be `2^n - 1`, e.g. `SAMPLE_1_IN_8192`) for hot-path call sites that need periodic-not-every-message sampling. It samples true on a fresh thread's very first call, then exactly once per `mask + 1` consecutive calls after that.
 
+[[crates/observability-core/benches/hot_path.rs]] measures these calls with std and `hdrhistogram` only. It prints batch-mean nanoseconds per call (p50, p99, p999, max) for each hot-path call and for drains over 1, 8, and 64 live slots, then the RSS growth and drain time after 2,000 short-lived recording threads. Run it with `cargo bench -p observability-core --bench hot_path`.
+
 ## Shared OTLP, three sibling exporters
 
 [[crates/observability/src/otlp/mod.rs#OtlpConfig]] is the single source of endpoint, protocol, headers, resource attrs, timeout, and TLS for every OTLP signal.
