@@ -46,6 +46,10 @@ A worker's recorded latencies, plus one sample above the 60s bound, merge via `m
 
 The same drain returns the worker's message count, proving latency and count hand off together on one `merge_local` tick.
 
+### Window has two sigfig bounds
+
+A default `LatencyWindow` covers 1 ns to 60 s at 2 significant figures, which hdrhistogram stores in 3,840 counts (30,720 bytes). The test pins that footprint, the same for every per-thread and slot histogram.
+
 ### Drain resets the window before filling
 
 Ten 1,000 ns samples drain into a window. Three 2,000 ns samples then drain into the same window, which afterwards holds exactly those three and no 1,000 ns sample.

@@ -105,6 +105,17 @@ fn merge_local_and_drain_into_aggregate_across_threads_with_clamp() {
     assert_eq!(msgs, MSG_COUNT);
 }
 
+/// Pins the histogram footprint: 1ns..60s at 2 significant figures is 3,840 counts (30 KB).
+// @lat: [[tests#Cross-thread histogram and count aggregation#Window has two sigfig bounds]]
+#[test]
+fn window_has_two_sigfig_bounds() {
+    let window = LatencyWindow::default();
+    let hist = window.histogram();
+    assert_eq!(hist.sigfig(), 2);
+    assert_eq!(hist.high(), 60_000_000_000);
+    assert_eq!(hist.distinct_values(), 3_840);
+}
+
 /// A second drain into the same window holds only what arrived after the first.
 // @lat: [[tests#Cross-thread histogram and count aggregation#Drain resets the window before filling]]
 #[test]
