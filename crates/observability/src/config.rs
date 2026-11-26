@@ -113,21 +113,19 @@ pub enum Rotation {
     Never,
 }
 
-/// Tracing subsystem config: which exporter backs the span pipeline.
-#[derive(Clone, Debug, Default)]
+/// OTLP span export. `TracingConfig::default()` exports every span the pipeline level
+/// lets through, with the SDK's default sampler.
+#[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct TracingConfig {
-    pub exporter: TraceExporter,
-}
-
-/// Trace exporter choice.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-pub enum TraceExporter {
-    #[default]
-    Otlp,
+    /// Level filter for exported spans; `None` uses `PipelineConfig::level`. A set
+    /// `RUST_LOG` overrides it, as it does for every sink.
+    pub level: Option<String>,
+    /// Probability that a root span is sampled, `0.0..=1.0`; child spans follow their
+    /// parent's decision. `None` keeps the SDK default, which reads `OTEL_TRACES_SAMPLER`
+    /// and samples every span when it is unset.
+    pub sample_ratio: Option<f64>,
 }
 
 /// Metrics subsystem config: which recorder backs the `metrics` facade.

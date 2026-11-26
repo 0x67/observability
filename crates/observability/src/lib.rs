@@ -19,7 +19,7 @@ mod redact;
 
 pub use config::{
     LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, PipelineConfig,
-    Rotation, TraceExporter, TracingConfig,
+    Rotation, TracingConfig,
 };
 pub use error::{MetricsError, OtlpError, PipelineError, Signal};
 pub use metrics::{MetricsGuard, init_metrics};

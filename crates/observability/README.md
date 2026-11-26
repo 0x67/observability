@@ -193,9 +193,9 @@ type appears in a public signature; the install site picks the source.
 ## Config surface
 
 `PipelineConfig` and its parts are plain data with no `opentelemetry` type in any field:
-`LoggingConfig` / `LogSink` / `LogSinkKind` / `LogFormat` / `Rotation`, `TracingConfig` /
-`TraceExporter`, `MetricsConfig` / `MetricsExporter`, and `OtlpConfig` / `OtlpProtocol` /
-`OtlpTls` / `TlsRoots` / `ClientCert`. The runtime gate helpers (`metrics_enabled`,
+`LoggingConfig` / `LogSink` / `LogSinkKind` / `LogFormat` / `Rotation`, `TracingConfig`,
+`MetricsConfig` / `MetricsExporter`, and `OtlpConfig` / `OtlpProtocol` / `OtlpTls` /
+`TlsRoots` / `ClientCert`. The runtime gate helpers (`metrics_enabled`,
 `set_metrics_enabled`) and the whole `observability_core` crate are re-exported, so a binary
 drives the hot-path gate through `observability` without a second dependency line.
 

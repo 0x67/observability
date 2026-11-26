@@ -14,8 +14,7 @@ use std::{fs, time::Duration};
 
 use observability::{
     LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, OtlpConfig,
-    OtlpProtocol, PipelineConfig, Rotation, TraceExporter, TracingConfig, init_metrics,
-    init_pipeline,
+    OtlpProtocol, PipelineConfig, Rotation, TracingConfig, init_metrics, init_pipeline,
 };
 
 #[test]
@@ -50,9 +49,7 @@ fn https_export_reaches_real_collector() {
                 level: None,
             }],
         }),
-        tracing: Some(TracingConfig {
-            exporter: TraceExporter::Otlp,
-        }),
+        tracing: Some(TracingConfig::default()),
     })
     .expect("pipeline installs");
     let metrics = init_metrics(

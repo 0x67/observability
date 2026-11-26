@@ -24,6 +24,8 @@ pub enum PipelineError {
         #[source]
         source: OtlpError,
     },
+    #[error("trace sample ratio {0} is outside 0.0..=1.0")]
+    SampleRatio(f64),
 }
 
 /// OTLP signal a pipeline error refers to.

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use observability::{
     MetricsConfig, MetricsExporter, ObsConfig, OtlpConfig, OtlpProtocol, PipelineConfig,
-    TraceExporter, TracingConfig, init,
+    TracingConfig, init,
 };
 
 // @lat: [[tests#Guard drop#ObsGuard drop inside async context delivers over HTTP]]
@@ -29,9 +29,7 @@ fn obs_guard_drop_inside_async_context_delivers_over_http() {
                 ..Default::default()
             }),
             logging: None,
-            tracing: Some(TracingConfig {
-                exporter: TraceExporter::Otlp,
-            }),
+            tracing: Some(TracingConfig::default()),
         },
         metrics: Some(MetricsConfig {
             exporter: MetricsExporter::Otlp,

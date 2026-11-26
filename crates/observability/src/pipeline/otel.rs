@@ -5,12 +5,12 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 #[cfg(feature = "otel-logs")]
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use tracing_subscriber::Layer;
 
 use super::{BoxedLayer, filter::otlp_filter};
 use crate::{
-    config::{LogSink, LogSinkKind, PipelineConfig},
+    config::{LogSink, LogSinkKind, PipelineConfig, TracingConfig},
     error::{OtlpError, PipelineError, Signal},
     otlp::{ExportRuntime, OtlpConfig},
 };
@@ -73,16 +73,15 @@ pub(super) fn otel_layers(
         source,
     })?;
 
-    let tracer = match cfg.tracing {
-        Some(_) => {
-            let provider =
-                build_tracer_provider(otlp, &cfg.service_name, &runtime).map_err(|source| {
-                    PipelineError::Exporter {
-                        signal: Signal::Traces,
-                        source,
-                    }
+    let tracer = match &cfg.tracing {
+        Some(tracing) => {
+            let provider = build_tracer_provider(otlp, &cfg.service_name, &runtime, tracing)
+                .map_err(|source| PipelineError::Exporter {
+                    signal: Signal::Traces,
+                    source,
                 })?;
-            layers.push(trace_layer(&provider, &cfg.level));
+            let level = tracing.level.as_deref().unwrap_or(&cfg.level);
+            layers.push(trace_layer(&provider, level));
             Some(provider)
         }
         None => None,
@@ -137,12 +136,21 @@ fn build_tracer_provider(
     otlp: &OtlpConfig,
     service: &str,
     runtime: &ExportRuntime,
+    tracing: &TracingConfig,
 ) -> Result<SdkTracerProvider, OtlpError> {
     let exporter = otlp.span_exporter(runtime)?;
-    Ok(SdkTracerProvider::builder()
+    let builder = SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
-        .with_resource(otlp.otel_resource(service))
-        .build())
+        .with_resource(otlp.otel_resource(service));
+    // without a sampler set, the SDK reads OTEL_TRACES_SAMPLER
+    let builder = match tracing.sample_ratio {
+        Some(ratio) => builder.with_sampler(Sampler::ParentBased(Box::new(
+            Sampler::TraceIdRatioBased(ratio),
+        ))),
+        None => builder,
+    };
+
+    Ok(builder.build())
 }
 
 #[cfg(feature = "otel-logs")]

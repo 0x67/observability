@@ -2,8 +2,8 @@
 //! subscriber is installed. No test here installs one, so they share this binary.
 
 use observability::{
-    LogFormat, LogSink, LogSinkKind, LoggingConfig, PipelineConfig, PipelineError, TraceExporter,
-    TracingConfig, init_pipeline,
+    LogFormat, LogSink, LogSinkKind, LoggingConfig, PipelineConfig, PipelineError, TracingConfig,
+    init_pipeline,
 };
 
 fn config() -> PipelineConfig {
@@ -17,9 +17,7 @@ fn config() -> PipelineConfig {
 }
 
 fn tracing_on() -> Option<TracingConfig> {
-    Some(TracingConfig {
-        exporter: TraceExporter::Otlp,
-    })
+    Some(TracingConfig::default())
 }
 
 fn one_sink(kind: LogSinkKind, format: LogFormat) -> Option<LoggingConfig> {

@@ -6,9 +6,7 @@ mod http_collector;
 
 use std::time::Duration;
 
-use observability::{
-    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
-};
+use observability::{OtlpConfig, OtlpProtocol, PipelineConfig, TracingConfig, init_pipeline};
 
 // @lat: [[tests#OTLP headers#HTTP export sends configured headers]]
 #[test]
@@ -27,9 +25,7 @@ fn http_export_sends_configured_headers() {
             ..Default::default()
         }),
         logging: None,
-        tracing: Some(TracingConfig {
-            exporter: TraceExporter::Otlp,
-        }),
+        tracing: Some(TracingConfig::default()),
     };
 
     let guard = init_pipeline(cfg).expect("pipeline installs");
