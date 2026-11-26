@@ -9,69 +9,21 @@ use std::{
     cell::{Cell, RefCell},
     sync::{
         Arc, LazyLock, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
-    time::Instant,
 };
 
 use hdrhistogram::Histogram;
 
-// ---------------------------------------------------------------------
-// Runtime gate: process-wide atomic, per-thread mirror to skip the
-// cross-core hop on the hot path once primed.
-// ---------------------------------------------------------------------
+mod gate;
+mod sample;
+mod timer;
 
-/// Process-wide metrics gate. Starts OFF; flip with [`set_metrics_enabled`].
-pub static METRICS_ON: AtomicBool = AtomicBool::new(false);
+pub mod field;
 
-thread_local! {
-    static GATE_MIRROR: Cell<Option<bool>> = const { Cell::new(None) };
-}
-
-/// Flip process-wide gate. Relaxed: gate is advisory, not ordering-sensitive vs other state.
-pub fn set_metrics_enabled(on: bool) {
-    METRICS_ON.store(on, Ordering::Relaxed);
-}
-
-/// Sync this thread's cached gate value from the process-wide flag.
-/// Call once per thread at startup, and again after any runtime toggle a thread cares about.
-pub fn refresh_thread_gate() {
-    GATE_MIRROR.set(Some(METRICS_ON.load(Ordering::Relaxed)));
-}
-
-/// Gate check for hot path. Reads primed thread-local mirror; falls to shared atomic if unset.
-#[inline]
-pub fn metrics_enabled() -> bool {
-    GATE_MIRROR
-        .with(|mirror| mirror.get())
-        .unwrap_or_else(|| METRICS_ON.load(Ordering::Relaxed))
-}
-
-// ---------------------------------------------------------------------
-// Gated RAII timer: clock read only pays when gate is on.
-// ---------------------------------------------------------------------
-
-/// RAII latency timer. Records elapsed seconds into `metric`'s histogram on drop.
-/// `None` variant means gate was off at start: no clock read, no record on drop.
-pub struct Timer(Option<(Instant, &'static str)>);
-
-/// Start a timer for `metric` iff [`metrics_enabled`], else skip the clock read entirely.
-#[inline]
-pub fn timer(metric: &'static str) -> Timer {
-    if metrics_enabled() {
-        Timer(Some((Instant::now(), metric)))
-    } else {
-        Timer(None)
-    }
-}
-
-impl Drop for Timer {
-    fn drop(&mut self) {
-        if let Some((start, metric)) = self.0 {
-            metrics::histogram!(metric).record(start.elapsed().as_secs_f64());
-        }
-    }
-}
+pub use gate::{METRICS_ON, metrics_enabled, refresh_thread_gate, set_metrics_enabled};
+pub use sample::{SAMPLE_1_IN_8192, should_sample};
+pub use timer::{Timer, timer};
 
 // ---------------------------------------------------------------------
 // Thread-local bounded histogram + cross-thread drain.
@@ -169,7 +121,6 @@ static COUNT_REGISTRY: LazyLock<Mutex<Vec<Arc<AtomicU64>>>> =
 thread_local! {
     static COUNT: Cell<u64> = const { Cell::new(0) };
     static COUNT_SHARED: RefCell<Option<Arc<AtomicU64>>> = const { RefCell::new(None) };
-    static SAMPLE_CTR: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Increment this thread's message counter. Wrapping: overflow wraps, never panics.
@@ -193,20 +144,6 @@ pub fn drain_count() -> u64 {
         .map(|slot| slot.swap(0, Ordering::Relaxed))
         .sum()
 }
-
-/// True exactly once per `mask + 1` calls. `mask` must be `2^n - 1` (e.g. [`SAMPLE_1_IN_8192`]).
-/// Checks the pre-increment counter value, so the very first call on a thread always samples.
-#[inline]
-pub fn should_sample(mask: u64) -> bool {
-    SAMPLE_CTR.with(|c| {
-        let v = c.get();
-        c.set(v.wrapping_add(1));
-        v & mask == 0
-    })
-}
-
-/// Mask for 1-in-8192 sampling: pass to [`should_sample`].
-pub const SAMPLE_1_IN_8192: u64 = 8192 - 1;
 
 // ---------------------------------------------------------------------
 // Optional tokio flusher.
@@ -235,26 +172,6 @@ pub fn spawn_flusher(latency_prefix: &'static str, count_metric: &'static str) {
     });
 }
 
-// ---------------------------------------------------------------------
-// OTel-standard field keys. No project-invented `myapp.*` keys.
-// ---------------------------------------------------------------------
-
-/// OTel-standard attribute key constants for structured log/span/metric fields.
-pub mod field {
-    pub const HTTP_REQUEST_METHOD: &str = "http.request.method";
-    pub const HTTP_ROUTE: &str = "http.route";
-    pub const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
-    pub const RPC_METHOD: &str = "rpc.method";
-    pub const RPC_SERVICE: &str = "rpc.service";
-    pub const ERROR_TYPE: &str = "error.type";
-    pub const ENDUSER_ID: &str = "enduser.id";
-    pub const SERVER_ADDRESS: &str = "server.address";
-    pub const SERVER_PORT: &str = "server.port";
-    pub const NETWORK_PROTOCOL_NAME: &str = "network.protocol.name";
-    pub const MESSAGING_SYSTEM: &str = "messaging.system";
-    pub const MESSAGING_DESTINATION_NAME: &str = "messaging.destination.name";
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,74 +179,6 @@ mod tests {
     // NOTE: flush-tokio flusher (spawn_flusher) not covered here. It only proves
     // itself through the metrics facade global recorder, and installing one would
     // race every other test sharing this process. Skipped.
-
-    /// Gate starts off; set + refresh flips the thread mirror.
-    // @lat: [[tests#Runtime gate#Gate defaults off then flips via refresh]]
-    #[test]
-    fn gate_defaults_off_then_flips_via_refresh() {
-        assert!(
-            !metrics_enabled(),
-            "gate must default off before any enable call"
-        );
-        set_metrics_enabled(true);
-        refresh_thread_gate();
-        assert!(metrics_enabled());
-        // leave gate clean for any test sharing this process
-        set_metrics_enabled(false);
-        refresh_thread_gate();
-    }
-
-    /// Timer skips clock read when gate off, captures start + metric name when on.
-    // @lat: [[tests#Runtime gate#Timer skips clock when gate off, captures when on]]
-    #[test]
-    fn timer_skips_clock_off_gate_captures_on_gate() {
-        set_metrics_enabled(false);
-        refresh_thread_gate();
-        assert!(
-            timer("x").0.is_none(),
-            "off gate: no clock read, no capture"
-        );
-
-        set_metrics_enabled(true);
-        refresh_thread_gate();
-        assert!(
-            timer("x").0.is_some(),
-            "on gate: start instant + metric name captured"
-        );
-
-        set_metrics_enabled(false);
-        refresh_thread_gate();
-    }
-
-    /// should_sample: fires on fresh thread's first call, again one period later,
-    /// exactly once per period-length run of consecutive calls, whatever the start offset.
-    // @lat: [[tests#Sampling#Fires on first call and every period after]]
-    #[test]
-    fn should_sample_fires_first_call_and_every_period_after() {
-        const MASK: u64 = SAMPLE_1_IN_8192;
-        const PERIOD: u64 = MASK + 1;
-
-        std::thread::spawn(|| {
-            assert!(
-                should_sample(MASK),
-                "first call on fresh thread must sample"
-            );
-
-            let stray = (0..PERIOD - 1).filter(|_| should_sample(MASK)).count();
-            assert_eq!(stray, 0, "no sample strictly between period boundaries");
-
-            assert!(
-                should_sample(MASK),
-                "sample fires again exactly one period later"
-            );
-
-            // any PERIOD consecutive calls cross exactly one boundary
-            let hits = (0..PERIOD).filter(|_| should_sample(MASK)).count();
-            assert_eq!(hits, 1, "exactly one sample per PERIOD consecutive calls");
-        })
-        .join()
-        .unwrap();
-    }
 
     /// take_count reads then resets this thread's counter; second read is zero.
     // @lat: [[tests#Per-thread message counting#take_count reads then resets]]
@@ -386,36 +235,5 @@ mod tests {
         );
 
         assert_eq!(drain_count(), MSG_COUNT);
-    }
-
-    /// field keys stay dotted OTel names, never project-invented myapp.* prefixes.
-    // @lat: [[tests#OTel-standard field keys#Field keys are dotted OTel names without a project prefix]]
-    #[test]
-    fn field_keys_are_dotted_otel_names_without_project_prefix() {
-        assert_eq!(field::HTTP_REQUEST_METHOD, "http.request.method");
-        assert_eq!(field::HTTP_ROUTE, "http.route");
-        assert_eq!(field::RPC_SERVICE, "rpc.service");
-        assert_eq!(field::ERROR_TYPE, "error.type");
-
-        let keys = [
-            field::HTTP_REQUEST_METHOD,
-            field::HTTP_ROUTE,
-            field::HTTP_RESPONSE_STATUS_CODE,
-            field::RPC_METHOD,
-            field::RPC_SERVICE,
-            field::ERROR_TYPE,
-            field::ENDUSER_ID,
-            field::SERVER_ADDRESS,
-            field::SERVER_PORT,
-            field::NETWORK_PROTOCOL_NAME,
-            field::MESSAGING_SYSTEM,
-            field::MESSAGING_DESTINATION_NAME,
-        ];
-        for key in keys {
-            assert!(
-                !key.contains("myapp"),
-                "field key leaked project prefix: {key}"
-            );
-        }
     }
 }
