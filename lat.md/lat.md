@@ -44,6 +44,8 @@ Its `Debug` output prints each header name with `[REDACTED]` in place of the val
 
 `ExportRuntime::shared` hands out the live runtime through a `Weak` slot, so the pipeline and metrics guards share one export thread, and an init after every guard dropped starts a fresh one. Each guard holds its `Arc` behind its providers, so the runtime outlives their final flush. The last `Arc` to drop calls `shutdown_background`, which is safe inside an async context.
 
+Every configured header goes out on both transports: as HTTP headers, or as gRPC metadata through `MetadataMap::from_headers`. A header whose name or value is not valid HTTP returns `OtlpError::InvalidHeader` at init, naming the header and never its value, because opentelemetry-otlp would drop it without a word.
+
 TLS applies only to `https://` endpoints, so `http://localhost` stays plain text. [[crates/observability/src/otlp/tls.rs#OtlpTls]] picks the roots, and the default `tls` feature turns it on. `TlsRoots::Native` is the OS store, checked for at least one certificate at init so both transports fail the same way when it is empty. `TlsRoots::Webpki` is the bundled Mozilla set under `tls-webpki-roots`. `TlsRoots::CaFileOnly` trusts only `ca_file`. Without `tls`, an `https://` endpoint returns `OtlpError::FeatureDisabled`. ring is the crypto provider unless the app installs a process-wide one first.
 
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.

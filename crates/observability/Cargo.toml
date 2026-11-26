@@ -31,6 +31,7 @@ tokio = { workspace = true, optional = true, features = ["rt-multi-thread", "net
 opentelemetry-http = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 # `tls`: checks the OS store at init so both transports fail the same way when it is empty.
 rustls-native-certs = { workspace = true, optional = true }
 # per-signal / per-exporter.
@@ -54,6 +55,7 @@ otel = [
   "dep:opentelemetry-http",
   "dep:reqwest",
   "dep:async-trait",
+  "dep:http",
 ]
 # TLS for `https://` endpoints only; `http://` stays plain text. ring is the crypto provider
 # unless the app installs a process-wide one first.
@@ -73,3 +75,12 @@ otel-logs = ["otel", "dep:opentelemetry-appender-tracing"]
 metrics-prom = ["dep:metrics-exporter-prometheus"]
 metrics-otel = ["otel", "dep:metrics-exporter-otel"]
 bunyan = ["dep:tracing-bunyan-formatter"]
+
+[dev-dependencies]
+tonic = { workspace = true, features = ["transport", "router"] }
+opentelemetry-proto = { workspace = true, features = [
+  "gen-tonic",
+  "trace",
+  "logs",
+  "metrics",
+] }
