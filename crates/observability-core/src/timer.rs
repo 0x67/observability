@@ -29,27 +29,25 @@ impl Drop for Timer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gate::{refresh_thread_gate, set_metrics_enabled};
+    use crate::gate::set_metrics_enabled;
 
     /// Timer skips clock read when gate off, captures start + metric name when on.
     // @lat: [[tests#Runtime gate#Timer skips clock when gate off, captures when on]]
     #[test]
     fn timer_skips_clock_off_gate_captures_on_gate() {
+        let _state = crate::test_state();
         set_metrics_enabled(false);
-        refresh_thread_gate();
         assert!(
             timer("x").0.is_none(),
             "off gate: no clock read, no capture"
         );
 
         set_metrics_enabled(true);
-        refresh_thread_gate();
         assert!(
             timer("x").0.is_some(),
             "on gate: start instant + metric name captured"
         );
 
         set_metrics_enabled(false);
-        refresh_thread_gate();
     }
 }

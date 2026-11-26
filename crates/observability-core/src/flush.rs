@@ -1,9 +1,6 @@
 //! Optional tokio flusher.
 
-use crate::{
-    gate::refresh_thread_gate,
-    handoff::{drain_all, drain_count},
-};
+use crate::handoff::{drain_all, drain_count};
 
 /// Spawn a 100ms tokio loop draining histograms + counters into `metrics` gauges/counters.
 ///
@@ -16,7 +13,6 @@ pub fn spawn_flusher(latency_prefix: &'static str, count_metric: &'static str) {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             tick.tick().await;
-            refresh_thread_gate();
             let h = drain_all();
             metrics::gauge!(format!("{latency_prefix}.p50")).set(h.value_at_quantile(0.50) as f64);
             metrics::gauge!(format!("{latency_prefix}.p99")).set(h.value_at_quantile(0.99) as f64);

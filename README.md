@@ -77,10 +77,7 @@ tracing without `otlp` or an `https://` endpoint built without the `tls` feature
 On a hot-path library that only records latency, depend on `observability-core` alone:
 
 ```rust
-use observability_core::{refresh_thread_gate, record_latency_ns, count_msg, merge_local};
-
-// once per worker thread at startup
-refresh_thread_gate();
+use observability_core::{record_latency_ns, count_msg, merge_local};
 
 // per message on the receive loop; both are no-ops while the gate is off
 let t0 = std::time::Instant::now();
@@ -115,9 +112,10 @@ runtime. `https://` endpoints use TLS through the default `tls` feature, with th
 roots, the OS platform verifier, or a private CA, and optionally a client certificate. The
 [`observability` crate README](crates/observability#tls) has the details.
 
-`observability-core` keeps the hot path off shared atomics: the runtime gate is mirrored into a
-thread-local `Cell`, latency samples land in a thread-local bounded `hdrhistogram::Histogram`,
-and message counts sit in a plain per-thread `Cell`. Both merge into shared registries only on a
+`observability-core` keeps hot-path writes thread-local. The runtime gate is one process-wide
+atomic that every thread reads with a `Relaxed` load. The gate is written rarely, which keeps
+that read in each core's cache. Latency samples land in a thread-local bounded `hdrhistogram::Histogram`, and
+message counts sit in a plain per-thread `Cell`. Both merge into shared registries only on a
 periodic tick, so a flusher on another thread only ever sees data a worker already handed off.
 
 See [`lat.md/lat.md`](lat.md/lat.md) for the full design intent and the per-subsystem rationale.
