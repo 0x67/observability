@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use observability::{
     LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, ObsConfig,
-    OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig, TraceExporter, TracingConfig, init,
+    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init,
 };
 
 const SERVICE: &str = "signal-paths-probe";
@@ -27,10 +27,8 @@ fn one_endpoint_sends_each_signal_to_its_path() {
             otlp: Some(OtlpConfig {
                 endpoint: base,
                 protocol: OtlpProtocol::HttpProtobuf,
-                headers: Vec::new(),
-                resource: Vec::new(),
                 timeout: Duration::from_secs(5),
-                tls: OtlpTls::default(),
+                ..Default::default()
             }),
             logging: Some(LoggingConfig {
                 sinks: vec![LogSink {

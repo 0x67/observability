@@ -8,7 +8,7 @@ mod grpc_collector;
 use std::time::Duration;
 
 use observability::{
-    OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
+    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
 };
 
 // @lat: [[tests#OTLP headers#gRPC export without app runtime sends headers as metadata]]
@@ -24,13 +24,13 @@ fn grpc_export_without_app_runtime_sends_headers_as_metadata() {
         otlp: Some(OtlpConfig {
             endpoint,
             protocol: OtlpProtocol::Grpc,
-            headers: vec![
+            headers: [
                 ("x-api-key".to_owned(), "k1".to_owned()),
                 ("X-Tenant".to_owned(), "t1".to_owned()),
-            ],
-            resource: Vec::new(),
+            ]
+            .into(),
             timeout: Duration::from_secs(5),
-            tls: OtlpTls::default(),
+            ..Default::default()
         }),
         logging: None,
         tracing: Some(TracingConfig {

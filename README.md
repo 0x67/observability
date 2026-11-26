@@ -29,17 +29,15 @@ use std::time::Duration;
 use observability::{
     init, ObsConfig, PipelineConfig, LoggingConfig, LogSink, LogSinkKind, LogFormat,
     TracingConfig, TraceExporter, MetricsConfig, MetricsExporter, OtlpConfig, OtlpProtocol,
-    OtlpTls,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let otlp = OtlpConfig {
         endpoint: "http://localhost:4317".into(),
         protocol: OtlpProtocol::Grpc,
-        headers: vec![],
-        resource: vec![("deployment.environment".into(), "prod".into())],
+        resource: [("deployment.environment".into(), "prod".into())].into(),
         timeout: Duration::from_secs(5),
-        tls: OtlpTls::default(),
+        ..Default::default()
     };
 
     let cfg = ObsConfig {

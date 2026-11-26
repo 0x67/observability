@@ -30,7 +30,8 @@ pub use otlp::{ClientCert, OtlpConfig, OtlpProtocol, OtlpTls, TlsRoots};
 pub use pipeline::{PipelineGuard, init_pipeline};
 
 /// Both subsystems in one value. `metrics` is optional so a build can run logging + tracing
-/// without a recorder.
+/// without a recorder. The default is the default pipeline with no metrics recorder.
+#[derive(Default)]
 pub struct ObsConfig {
     pub pipeline: PipelineConfig,
     pub metrics: Option<MetricsConfig>,

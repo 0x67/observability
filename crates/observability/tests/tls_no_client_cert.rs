@@ -20,10 +20,9 @@ fn otlp(protocol: OtlpProtocol, endpoint: String, tls: OtlpTls) -> OtlpConfig {
     OtlpConfig {
         endpoint,
         protocol,
-        headers: Vec::new(),
-        resource: Vec::new(),
         timeout: Duration::from_secs(2),
         tls,
+        ..Default::default()
     }
 }
 

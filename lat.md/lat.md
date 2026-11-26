@@ -22,6 +22,12 @@ Each layer in the registry has a filter. One unfiltered layer would leave the re
 
 The subsystems are coupled at runtime in two places. One is the `OtlpConfig` value `init` clones out of `PipelineConfig` before calling `init_pipeline`, then hands to `init_metrics` alongside the service name. The other is the export runtime, which both get from `ExportRuntime::shared`.
 
+## Config surface
+
+Every config type has a `Default` that builds a working pipeline with no tokio runtime, so a caller sets only the fields that differ with `..Default::default()`.
+
+[[crates/observability/src/config.rs#PipelineConfig]] defaults to stdout JSON logging at `info` for service `unknown_service`, the SDK's fallback name, with no OTLP and no tracing. [[crates/observability/src/lib.rs#ObsConfig]] adds no metrics recorder. `OtlpConfig` defaults to HTTP/protobuf at `http://localhost:4318` with a 10 s timeout, the OTLP defaults. `MetricsExporter` defaults to Prometheus on `127.0.0.1:9000`, loopback so a default build does not serve metrics on every interface. OTLP headers and resource attributes are `BTreeMap`s, one entry per key, iterated in key order.
+
 ## Hot-path memory model (observability-core)
 
 `observability-core` writes only thread-local state on the hot path; its one shared read is the gate flag. Everything sampled per-message lives in thread-local state, handed to one shared slot per thread only on a periodic tick or at thread exit.

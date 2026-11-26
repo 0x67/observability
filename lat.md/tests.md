@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -123,6 +123,20 @@ After the `Flusher` is dropped, a worker merges one sample and one message, and 
 ### Steady-state hot path does not allocate
 
 After one warm-up record, merge, and drain, 10,000 rounds of `metrics_enabled`, `record_latency_ns`, `count_msg`, `take_count`, `should_sample`, `merge_local`, and `drain_into` into one reused window don't call the allocator once.
+
+## Config defaults
+
+The default config values build a working pipeline, so a caller sets only the fields that differ.
+
+### Default ObsConfig inits without a runtime
+
+`init(ObsConfig::default())` on a plain test thread with no tokio runtime returns `Ok`, and the guard holds no metrics recorder.
+
+### Default OtlpConfig exports HTTP protobuf to the base URL
+
+`OtlpConfig { endpoint: <mock base URL>, ..Default::default() }` with `TracingConfig::default()` and no app runtime sends the span in a `POST /v1/traces` with `content-type: application/x-protobuf`.
+
+A gRPC default would send nothing the HTTP mock accepts.
 
 ## Metrics recorder guard drop behavior
 

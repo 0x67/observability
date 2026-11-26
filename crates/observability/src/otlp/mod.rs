@@ -15,7 +15,7 @@ mod http_client;
 mod runtime;
 mod tls;
 
-use std::{fmt, time::Duration};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 #[cfg(feature = "otel")]
 use opentelemetry::KeyValue;
@@ -37,18 +37,32 @@ use crate::redact::REDACTED;
 
 /// Endpoint, transport, headers, resource attrs, timeout, and TLS for the OTLP collector.
 ///
-/// `Debug` prints header names with `[REDACTED]` in place of each value.
+/// The default is HTTP/protobuf to `http://localhost:4318` with a 10 s timeout, the OTLP
+/// defaults. `Debug` prints header names with `[REDACTED]` in place of each value.
 #[derive(Clone)]
 pub struct OtlpConfig {
     /// Collector base URL. HTTP export appends `/v1/traces`, `/v1/logs`, or `/v1/metrics`
     /// after dropping one trailing `/`; gRPC uses it as given.
     pub endpoint: String,
     pub protocol: OtlpProtocol,
-    pub headers: Vec<(String, String)>,
-    pub resource: Vec<(String, String)>,
+    pub headers: BTreeMap<String, String>,
+    pub resource: BTreeMap<String, String>,
     pub timeout: Duration,
     /// Used only for `https://` endpoints.
     pub tls: OtlpTls,
+}
+
+impl Default for OtlpConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://localhost:4318".to_owned(),
+            protocol: OtlpProtocol::HttpProtobuf,
+            headers: BTreeMap::new(),
+            resource: BTreeMap::new(),
+            timeout: Duration::from_secs(10),
+            tls: OtlpTls::default(),
+        }
+    }
 }
 
 impl fmt::Debug for OtlpConfig {
@@ -56,8 +70,8 @@ impl fmt::Debug for OtlpConfig {
         // header values are usually credentials; print the names only
         let headers: Vec<(&str, &str)> = self
             .headers
-            .iter()
-            .map(|(name, _)| (name.as_str(), REDACTED))
+            .keys()
+            .map(|name| (name.as_str(), REDACTED))
             .collect();
 
         f.debug_struct("OtlpConfig")
@@ -79,9 +93,10 @@ const LOGS_PATH: &str = "/v1/logs";
 const METRICS_PATH: &str = "/v1/metrics";
 
 /// Wire transport for the OTLP exporters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OtlpProtocol {
     Grpc,
+    #[default]
     HttpProtobuf,
 }
 
@@ -280,7 +295,7 @@ impl OtlpConfig {
 
     /// Headers as a map for the http transport's `with_headers`.
     fn http_headers(&self) -> std::collections::HashMap<String, String> {
-        self.headers.iter().cloned().collect()
+        self.headers.clone().into_iter().collect()
     }
 
     /// Resource shared by all three signal providers: `service.name` plus every configured
@@ -306,10 +321,8 @@ mod tests {
         OtlpConfig {
             endpoint: endpoint.to_owned(),
             protocol,
-            headers: Vec::new(),
-            resource: Vec::new(),
             timeout: Duration::from_secs(1),
-            tls: OtlpTls::default(),
+            ..Default::default()
         }
     }
 
@@ -369,7 +382,7 @@ mod tests {
         for (name, value) in [("x api", "k1"), ("x-api-key", "k1\n")] {
             for protocol in [OtlpProtocol::Grpc, OtlpProtocol::HttpProtobuf] {
                 let cfg = OtlpConfig {
-                    headers: vec![(name.to_owned(), value.to_owned())],
+                    headers: [(name.to_owned(), value.to_owned())].into(),
                     ..exporter_config(protocol, "http://127.0.0.1:4317")
                 };
 
@@ -452,10 +465,8 @@ mod tests {
             let cfg = OtlpConfig {
                 endpoint: endpoint.to_string(),
                 protocol,
-                headers: Vec::new(),
-                resource: Vec::new(),
                 timeout: Duration::from_secs(1),
-                tls: OtlpTls::default(),
+                ..Default::default()
             };
 
             if let Err(e) = cfg.span_exporter(&runtime) {
@@ -478,10 +489,10 @@ mod tests {
         let cfg = OtlpConfig {
             endpoint: "http://collector:4318".to_string(),
             protocol: OtlpProtocol::HttpProtobuf,
-            headers: vec![("x-api-key".to_string(), "s3cr3t-value".to_string())],
-            resource: vec![("deployment.environment".to_string(), "prod".to_string())],
+            headers: [("x-api-key".to_string(), "s3cr3t-value".to_string())].into(),
+            resource: [("deployment.environment".to_string(), "prod".to_string())].into(),
             timeout: Duration::from_secs(5),
-            tls: OtlpTls::default(),
+            ..Default::default()
         };
 
         let out = format!("{cfg:?}");
