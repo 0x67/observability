@@ -155,3 +155,33 @@ fn invalid_endpoint_returns_exporter_error() {
         "{err:?}"
     );
 }
+
+// @lat: [[tests#Rolling file sink#Rolling file in unwritable dir returns err]]
+#[test]
+fn rolling_file_in_unwritable_dir_returns_err() {
+    use observability::Rotation;
+
+    // a directory below a regular file cannot be created on any OS, root or not
+    let file = std::env::temp_dir().join(format!("obs-not-a-dir-{}", std::process::id()));
+    std::fs::write(&file, "").expect("write the blocking file");
+    let dir = file.join("logs");
+
+    let err = init_error(PipelineConfig {
+        logging: one_sink(
+            LogSinkKind::RollingFile {
+                dir: dir.clone(),
+                prefix: "app".to_owned(),
+                rotation: Rotation::Daily,
+                max_files: None,
+            },
+            LogFormat::Json,
+        ),
+        ..config()
+    });
+
+    std::fs::remove_file(&file).expect("remove the blocking file");
+    assert!(
+        matches!(&err, PipelineError::RollingFile { dir: got, .. } if *got == dir),
+        "{err:?}"
+    );
+}

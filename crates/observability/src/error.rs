@@ -12,6 +12,12 @@ pub enum PipelineError {
     MissingOtlp(Signal),
     #[error("the configuration needs the `{feature}` cargo feature")]
     FeatureDisabled { feature: &'static str },
+    #[error("cannot open a rolling log file in {}", dir.display())]
+    RollingFile {
+        dir: PathBuf,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
     #[error("cannot build the OTLP {signal} exporter")]
     Exporter {
         signal: Signal,
