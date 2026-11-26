@@ -42,3 +42,18 @@ jobs:
       - name: core dep boundary (no otel / tracing-subscriber in observability-core)
         run: |
           cargo tree -p observability-core | grep -Eq 'opentelemetry|tracing-subscriber' && { echo "observability-core dep boundary violated"; exit 1; } || echo "core boundary clean"
+
+  # fails on unpinned actions, broad token permissions, or template injection
+  workflow-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
+        with:
+          tool: zizmor@1.33.1
+      - name: zizmor
+        run: zizmor .github/workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
