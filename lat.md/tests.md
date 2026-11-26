@@ -86,6 +86,14 @@ A thread that counts one message and merges registers exactly one slot. The next
 
 A thread-local destructor that runs after the core's thread-local state is gone calls `record_latency_ns`, `count_msg`, and `merge_local`. Each call drops its data, and the thread joins without a panic.
 
+## Hot-path allocation
+
+`tests/hot_path_alloc.rs` installs a global allocator that counts each thread's `alloc` and `realloc` calls, so any allocation on the per-message path fails the build's tests.
+
+### Steady-state hot path does not allocate
+
+After one warm-up record, merge, and drain, 10,000 rounds of `metrics_enabled`, `record_latency_ns`, `count_msg`, `take_count`, `should_sample`, `merge_local`, and `drain_into` into one reused window don't call the allocator once.
+
 ## Metrics recorder guard drop behavior
 
 `MetricsGuard` is the RAII handle for an installed metrics recorder; its `Drop` impl must flip the `observability-core` gate off so a torn-down recorder never leaves the hot path believing metrics are still live.
