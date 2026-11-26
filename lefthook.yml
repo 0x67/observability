@@ -27,7 +27,7 @@ pre-commit:
 
     clippy:
       glob: "*.rs"
-      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      run: cargo +stable clippy --workspace --all-targets --all-features -- -D warnings
 
     lat-check:
       run: lat check
