@@ -890,7 +890,6 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "thiserror",
- "tokio",
  "tracing",
  "tracing-appender",
  "tracing-bunyan-formatter",
@@ -1003,8 +1002,6 @@ dependencies = [
  "percent-encoding",
  "rand",
  "thiserror",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
