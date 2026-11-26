@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   release:
-    uses: 0x67/ci/.github/workflows/release-please.yml@main
+    uses: 0x67/ci/.github/workflows/release-please.yml@8f369fc7a2dc99282afb6d68df07349dda365a9b # main on 2026-11-26
     secrets:
       release-token: ${{ secrets.RELEASE_PLZ_TOKEN }}

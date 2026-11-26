@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   lint:
-    uses: 0x67/ci/.github/workflows/pr-title.yml@main
+    uses: 0x67/ci/.github/workflows/pr-title.yml@8f369fc7a2dc99282afb6d68df07349dda365a9b # main on 2026-11-26
