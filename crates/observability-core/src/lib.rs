@@ -23,6 +23,11 @@ pub use handoff::{
 pub use sample::{SAMPLE_1_IN_8192, should_sample};
 pub use timer::{Timer, timer};
 
+// the README's flusher snippet calls spawn_flusher, which exists only with flush-tokio
+#[cfg(all(doctest, feature = "flush-tokio"))]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
+
 /// Serializes unit tests that flip the gate or touch the shared slots; both are process-wide.
 #[cfg(test)]
 static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());

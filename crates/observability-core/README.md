@@ -18,7 +18,7 @@ live local state.
 One private process-wide `AtomicBool`, off at start. Every thread reads it directly, and a
 `set_metrics_enabled` call is visible on every thread without per-thread setup or a refresh call.
 
-```rust
+```rust,ignore
 pub fn set_metrics_enabled(on: bool);   // flip the process-wide gate (Relaxed; advisory)
 pub fn metrics_enabled() -> bool;       // hot-path check: one Relaxed load
 ```
@@ -28,7 +28,7 @@ binary rarely calls `set_metrics_enabled` directly.
 
 ## Latency, counts, sampling
 
-```rust
+```rust,ignore
 pub struct Timer(/* ... */);
 pub fn timer(metric: &'static str) -> Timer;   // RAII; records elapsed secs on drop
 pub fn record_latency_ns(ns: u64);             // thread-local histogram; no-op if gate off
@@ -63,7 +63,7 @@ if should_sample(SAMPLE_1_IN_8192) {
 Each thread hands its samples and message count to one shared slot, on a worker tick or when the
 thread exits. A reader drains every slot into a window it owns.
 
-```rust
+```rust,ignore
 pub fn merge_local();                                 // hand this thread's samples + count to its slot
 pub struct LatencyWindow;                             // Default; histogram() -> &Histogram<u64>, in ns
 pub fn drain_into(window: &mut LatencyWindow) -> u64; // reset, fill from every slot, return msg count
@@ -84,16 +84,21 @@ recovered rather than propagated, and telemetry survives a panicked holder.
 observability-core = { git = "...", tag = "observability-core-v0.2.0", features = ["flush-tokio"] }
 ```
 
-```rust
+```rust,no_run
 use std::time::Duration;
 
+use observability_core::{Flusher, FlusherError};
+
 // inside a tokio runtime, after `observability::init` or another `metrics` recorder install
-let flusher = observability_core::spawn_flusher(
-    "feed.decode_latency",
-    "feed.msgs",
-    Duration::from_secs(15), // the scrape or export interval
-)?;
-// dropping `flusher` stops the task
+fn start_flusher() -> Result<Flusher, FlusherError> {
+    let flusher = observability_core::spawn_flusher(
+        "feed.decode_latency",
+        "feed.msgs",
+        Duration::from_secs(15), // the scrape or export interval
+    )?;
+    // dropping `flusher` stops the task
+    Ok(flusher)
+}
 ```
 
 Once per `interval` the flusher drains every slot into one window. It adds the drained message
