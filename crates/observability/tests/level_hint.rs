@@ -8,7 +8,7 @@ mod http_collector;
 use std::time::Duration;
 
 use observability::{
-    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
+    OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
 };
 use tracing::level_filters::LevelFilter;
 
@@ -27,6 +27,7 @@ fn tracing_on_keeps_global_max_level_and_drops_debug_spans() {
             headers: Vec::new(),
             resource: Vec::new(),
             timeout: Duration::from_secs(5),
+            tls: OtlpTls::default(),
         }),
         logging: None,
         tracing: Some(TracingConfig {

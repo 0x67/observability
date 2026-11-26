@@ -129,7 +129,7 @@ fn bunyan_sink_without_feature_returns_feature_disabled() {
 fn invalid_endpoint_returns_exporter_error() {
     use std::time::Duration;
 
-    use observability::{OtlpConfig, OtlpError, OtlpProtocol, Signal};
+    use observability::{OtlpConfig, OtlpError, OtlpProtocol, OtlpTls, Signal};
 
     let err = init_error(PipelineConfig {
         tracing: tracing_on(),
@@ -139,6 +139,7 @@ fn invalid_endpoint_returns_exporter_error() {
             headers: Vec::new(),
             resource: Vec::new(),
             timeout: Duration::from_secs(1),
+            tls: OtlpTls::default(),
         }),
         ..config()
     });

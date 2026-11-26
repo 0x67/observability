@@ -40,6 +40,7 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = [
 opentelemetry-http = { version = "0.31.0", default-features = false, features = ["reqwest"] }
 reqwest = { version = "0.12.28", default-features = false }
 async-trait = "0.1.89"
+rustls-native-certs = "0.8.4"
 opentelemetry-appender-tracing = "0.31"
 # backend: metrics exporters
 metrics-exporter-prometheus = "0.17"

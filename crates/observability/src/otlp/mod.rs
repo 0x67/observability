@@ -13,23 +13,27 @@
 mod http_client;
 #[cfg(feature = "otel")]
 mod runtime;
+mod tls;
 
 use std::{fmt, time::Duration};
 
 #[cfg(feature = "otel")]
 use opentelemetry::KeyValue;
 #[cfg(feature = "otel")]
-use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig, WithTonicConfig};
 
 #[cfg(feature = "otel")]
 use self::http_client::RuntimeHttpClient;
 #[cfg(feature = "otel")]
 pub(crate) use self::runtime::{EXPORT_THREAD_NAME, ExportRuntime};
+#[cfg(feature = "tls")]
+use self::tls::TlsMaterial;
+pub use self::tls::{ClientCert, OtlpTls, TlsRoots};
 #[cfg(feature = "otel")]
 use crate::error::OtlpError;
 use crate::redact::REDACTED;
 
-/// Endpoint, transport, headers, resource attrs, and timeout for the OTLP collector.
+/// Endpoint, transport, headers, resource attrs, timeout, and TLS for the OTLP collector.
 ///
 /// `Debug` prints header names with `[REDACTED]` in place of each value.
 #[derive(Clone)]
@@ -39,6 +43,8 @@ pub struct OtlpConfig {
     pub headers: Vec<(String, String)>,
     pub resource: Vec<(String, String)>,
     pub timeout: Duration,
+    /// Used only for `https://` endpoints.
+    pub tls: OtlpTls,
 }
 
 impl fmt::Debug for OtlpConfig {
@@ -56,6 +62,7 @@ impl fmt::Debug for OtlpConfig {
             .field("headers", &headers)
             .field("resource", &self.resource)
             .field("timeout", &self.timeout)
+            .field("tls", &self.tls)
             .finish()
     }
 }
@@ -145,11 +152,12 @@ impl OtlpConfig {
         build: impl FnOnce(B) -> Result<E, opentelemetry_otlp::ExporterBuildError>,
     ) -> Result<E, OtlpError>
     where
-        B: WithExportConfig,
+        B: WithExportConfig + WithTonicConfig,
     {
         let builder = builder
             .with_endpoint(&self.endpoint)
             .with_timeout(self.timeout);
+        let builder = self.with_grpc_tls(builder)?;
 
         // connect_lazy spawns the channel worker onto the runtime current at build time
         let _entered = runtime.handle().enter();
@@ -174,10 +182,49 @@ impl OtlpConfig {
 
     // opentelemetry-otlp applies its export timeout only to a client it builds itself
     fn reqwest_client(&self) -> Result<reqwest::Client, OtlpError> {
-        reqwest::Client::builder()
-            .timeout(self.timeout)
-            .build()
-            .map_err(OtlpError::build)
+        let builder = reqwest::Client::builder().timeout(self.timeout);
+        #[cfg(feature = "tls")]
+        let builder = match self.tls_material()? {
+            Some(tls) => tls.apply_to_reqwest(builder),
+            None => builder,
+        };
+        #[cfg(not(feature = "tls"))]
+        self.reject_https()?;
+
+        builder.build().map_err(OtlpError::build)
+    }
+
+    fn with_grpc_tls<B: WithTonicConfig>(&self, builder: B) -> Result<B, OtlpError> {
+        #[cfg(feature = "tls")]
+        if let Some(tls) = self.tls_material()? {
+            return Ok(builder.with_tls_config(tls.tonic_config()));
+        }
+        #[cfg(not(feature = "tls"))]
+        self.reject_https()?;
+
+        Ok(builder)
+    }
+
+    /// TLS material for an `https://` endpoint; `None` keeps the connection plain text.
+    #[cfg(feature = "tls")]
+    fn tls_material(&self) -> Result<Option<TlsMaterial>, OtlpError> {
+        self.is_https()
+            .then(|| TlsMaterial::load(&self.tls))
+            .transpose()
+    }
+
+    #[cfg(not(feature = "tls"))]
+    fn reject_https(&self) -> Result<(), OtlpError> {
+        if self.is_https() {
+            return Err(OtlpError::FeatureDisabled { feature: "tls" });
+        }
+        Ok(())
+    }
+
+    fn is_https(&self) -> bool {
+        self.endpoint
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
     }
 
     /// Headers as a map for the http transport's `with_headers`.
@@ -201,7 +248,66 @@ impl OtlpConfig {
 mod tests {
     use std::time::Duration;
 
-    use super::{OtlpConfig, OtlpProtocol};
+    use super::{OtlpConfig, OtlpProtocol, OtlpTls};
+
+    #[cfg(feature = "otel")]
+    fn https_config(protocol: OtlpProtocol, endpoint: &str) -> OtlpConfig {
+        OtlpConfig {
+            endpoint: endpoint.to_owned(),
+            protocol,
+            headers: Vec::new(),
+            resource: Vec::new(),
+            timeout: Duration::from_secs(1),
+            tls: OtlpTls::default(),
+        }
+    }
+
+    #[cfg(all(feature = "otel", not(feature = "tls")))]
+    #[test]
+    fn https_without_tls_feature_returns_feature_disabled() {
+        use std::sync::PoisonError;
+
+        use super::{ExportRuntime, runtime::tests::SLOT_LOCK};
+        use crate::error::OtlpError;
+
+        let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+        for (protocol, endpoint) in [
+            (OtlpProtocol::Grpc, "https://collector:4317"),
+            (OtlpProtocol::HttpProtobuf, "https://collector:4318"),
+            (OtlpProtocol::Grpc, "HTTPS://collector:4317"),
+        ] {
+            let built = https_config(protocol, endpoint).span_exporter(&runtime);
+
+            assert!(
+                matches!(built, Err(OtlpError::FeatureDisabled { feature: "tls" })),
+                "{protocol:?} {endpoint}: {:?}",
+                built.err()
+            );
+        }
+    }
+
+    // needs an OS certificate store with at least one root, as on every CI image
+    #[cfg(feature = "tls")]
+    #[test]
+    fn https_endpoints_build_with_tls() {
+        use std::sync::PoisonError;
+
+        use super::{ExportRuntime, runtime::tests::SLOT_LOCK};
+
+        let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+        for (protocol, endpoint) in [
+            (OtlpProtocol::Grpc, "https://collector:4317"),
+            (OtlpProtocol::HttpProtobuf, "https://collector:4318"),
+        ] {
+            if let Err(e) = https_config(protocol, endpoint).span_exporter(&runtime) {
+                panic!("{protocol:?} {endpoint}: {e}");
+            }
+        }
+    }
 
     #[cfg(feature = "otel")]
     #[test]
@@ -224,6 +330,7 @@ mod tests {
                 headers: Vec::new(),
                 resource: Vec::new(),
                 timeout: Duration::from_secs(1),
+                tls: OtlpTls::default(),
             };
 
             if let Err(e) = cfg.span_exporter(&runtime) {
@@ -249,6 +356,7 @@ mod tests {
             headers: vec![("x-api-key".to_string(), "s3cr3t-value".to_string())],
             resource: vec![("deployment.environment".to_string(), "prod".to_string())],
             timeout: Duration::from_secs(5),
+            tls: OtlpTls::default(),
         };
 
         let out = format!("{cfg:?}");
