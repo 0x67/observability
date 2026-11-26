@@ -8,7 +8,7 @@ Two-crate observability lib, reusable by any Rust project. [[crates/observabilit
 
 [[crates/observability/src/lib.rs#init]] brings up two subsystems that share nothing at runtime except one `OtlpConfig`.
 
-[[crates/observability/src/pipeline.rs#init_pipeline]] builds a single `tracing_subscriber::Registry`: a logging fan-out over every configured sink (stdout, rolling file, OTLP-log bridge), each with its own format and level filter, fused with exactly one tracing OTLP span sink. Tracing is never fanned out and never written to disk, by design; only logging fans out.
+[[crates/observability/src/pipeline/mod.rs#init_pipeline]] builds a single `tracing_subscriber::Registry`: a logging fan-out over every configured sink (stdout, rolling file, OTLP-log bridge), each with its own format and level filter, fused with exactly one tracing OTLP span sink. Tracing is never fanned out and never written to disk, by design; only logging fans out.
 
 [[crates/observability/src/metrics.rs#init_metrics]] installs the `metrics`-facade global recorder (Prometheus pull or OTLP push) and flips the `observability-core` gate on success only; any error path leaves the gate untouched. It runs independently of the pipeline: `init` calls `init_pipeline` first (so a metrics failure is itself logged), and a metrics install failure downgrades to a `tracing::warn!` plus `metrics: None`, never taking down logging or tracing.
 
@@ -28,11 +28,11 @@ Message counting mirrors the same shape: a plain per-thread `Cell<u64>` on the h
 
 ## Shared OTLP, three sibling exporters
 
-[[crates/observability/src/otlp.rs#OtlpConfig]] is the single source of endpoint, protocol, headers, resource attrs, and timeout for every OTLP signal.
+[[crates/observability/src/otlp/mod.rs#OtlpConfig]] is the single source of endpoint, protocol, headers, resource attrs, and timeout for every OTLP signal.
 
 Its `Debug` output prints each header name with `[REDACTED]` in place of the value, because header values usually carry API keys. `PipelineConfig` derives `Debug` and embeds the `OtlpConfig`, so `?cfg` in a log line is safe for both.
 
-`pipeline.rs` and `metrics.rs` each call its exporter builders directly: `span_exporter` for tracing, `metric_exporter` (under `metrics-otel`) for the metrics bridge, `log_exporter` (under `otel-logs`) for the log bridge layer, all off the same endpoint/timeout/headers pair. No `opentelemetry` type crosses into a public `observability` signature; the builders stay `pub(crate)` and otel-gated.
+`pipeline/otel.rs` and `metrics.rs` each call its exporter builders directly: `span_exporter` for tracing, `metric_exporter` (under `metrics-otel`) for the metrics bridge, `log_exporter` (under `otel-logs`) for the log bridge layer, all off the same endpoint/timeout/headers pair. No `opentelemetry` type crosses into a public `observability` signature; the builders stay `pub(crate)` and otel-gated.
 
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.
 
