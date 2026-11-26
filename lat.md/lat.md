@@ -30,6 +30,8 @@ Message counting mirrors the same shape: a plain per-thread `Cell<u64>` on the h
 
 [[crates/observability/src/otlp.rs#OtlpConfig]] is the single source of endpoint, protocol, headers, resource attrs, and timeout for every OTLP signal.
 
+Its `Debug` output prints each header name with `[REDACTED]` in place of the value, because header values usually carry API keys. `PipelineConfig` derives `Debug` and embeds the `OtlpConfig`, so `?cfg` in a log line is safe for both.
+
 `pipeline.rs` and `metrics.rs` each call its exporter builders directly: `span_exporter` for tracing, `metric_exporter` (under `metrics-otel`) for the metrics bridge, `log_exporter` (under `otel-logs`) for the log bridge layer, all off the same endpoint/timeout/headers pair. No `opentelemetry` type crosses into a public `observability` signature; the builders stay `pub(crate)` and otel-gated.
 
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.

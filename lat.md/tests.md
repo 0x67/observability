@@ -4,7 +4,7 @@ lat:
 ---
 # Tests
 
-Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`, plus the metrics recorder guard in `observability`.
+Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`, plus the metrics recorder guard and the OTLP config debug output in `observability`.
 
 ## Runtime gate
 
@@ -59,3 +59,11 @@ Every constant in the `field` module equals its documented OTel dotted name (for
 ### Drop flips the gate off
 
 Constructing a `MetricsGuard` flips the `observability-core` gate on; dropping that guard flips it back off, proving the recorder lifecycle and the hot-path gate stay in sync.
+
+## OTLP config debug output
+
+`OtlpConfig` holds header values that are usually credentials, so its hand-written `Debug` must never print them.
+
+### Debug prints header names and hides values
+
+Formatting an `OtlpConfig` that has header `("x-api-key", "s3cr3t-value")` shows the header name paired with `[REDACTED]`, never the value, and still shows endpoint, protocol, resource, and timeout.
