@@ -16,6 +16,8 @@ A rolling file sink whose directory cannot be created or opened returns `Pipelin
 
 Every layer in the registry carries a filter, because one unfiltered layer makes the registry report no max level hint and lifts the global max level to `trace`. The OTel span layer and the OTLP log bridge use [[crates/observability/src/pipeline/filter.rs#otlp_filter]]: the sink's `EnvFilter` combined with [[crates/observability/src/pipeline/filter.rs#ExporterThreadFilter]], which drops events and spans created on the export runtime's threads and the SDK's batch and periodic threads, so exporting never produces more telemetry for the same exporter. The fmt sinks keep only their level filter, so export errors still show in local logs. The bunyan span storage takes the filter of the most verbose bunyan sink.
 
+`ObsGuard`, [[crates/observability/src/pipeline/guard.rs#PipelineGuard]], and `MetricsGuard` are `#[must_use]`. A statement like `init_pipeline(cfg)?;` drops the guard at once, which stops the log writers and turns the metrics gate off, so the lint makes that mistake a compile-time warning.
+
 [[crates/observability/src/metrics.rs#init_metrics]] installs the `metrics`-facade global recorder (Prometheus pull or OTLP push) and flips the `observability-core` gate on success only; any error path leaves the gate untouched. It runs independently of the pipeline: `init` calls `init_pipeline` first (so a metrics failure is itself logged), and a metrics install failure downgrades to a `tracing::warn!` plus `metrics: None`, never taking down logging or tracing.
 
 The only runtime coupling between the two subsystems is the `OtlpConfig` value `init` clones out of `PipelineConfig` before calling `init_pipeline`, then hands to `init_metrics` alongside the service name.

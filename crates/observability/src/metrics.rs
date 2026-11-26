@@ -43,6 +43,7 @@ type OtelMeterProvider = ();
 ///
 /// Drop flips the `observability-core` gate off and, for the OTLP backend, shuts down
 /// the meter provider so its final export batch flushes before the process exits.
+#[must_use = "dropping the guard turns the metrics gate off; keep it alive for the process lifetime"]
 pub struct MetricsGuard {
     // read only by `shutdown_otel` under `metrics-otel`; unit type otherwise.
     #[allow(dead_code)]

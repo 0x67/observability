@@ -88,7 +88,7 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
     reject_otlp_signals(cfg, sinks)?;
 
     let guard = PipelineGuard {
-        workers,
+        _workers: workers,
         #[cfg(feature = "otel")]
         otel,
     };
