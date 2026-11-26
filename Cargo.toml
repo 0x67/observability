@@ -18,7 +18,7 @@ publish = false
 # hot-path core (observability-core)
 metrics = "0.24"
 hdrhistogram = "7"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "time", "macros"] }
+tokio = "1.54.1"
 # backend: tracing stack
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
