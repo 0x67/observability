@@ -10,15 +10,13 @@
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt};
 
-#[cfg(feature = "otel-logs")]
-use self::filter::env_filter;
-#[cfg(feature = "otel-logs")]
-use self::otel::build_logger_provider;
 #[cfg(feature = "otel")]
-use self::otel::{OtelProviders, build_tracer_provider};
-use self::sinks::{log_layer, rolling_appender};
+use self::otel::{OtelProviders, build_tracer_provider, trace_layer};
+#[cfg(feature = "otel-logs")]
+use self::otel::{build_logger_provider, log_bridge_layer};
 #[cfg(feature = "bunyan")]
-use crate::config::LogFormat;
+use self::sinks::bunyan_storage_layer;
+use self::sinks::{log_layer, rolling_appender};
 #[cfg(feature = "otel")]
 use crate::otlp::ExportRuntime;
 use crate::{
@@ -34,22 +32,22 @@ mod sinks;
 
 pub use guard::PipelineGuard;
 
+type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync>;
+
 /// Build the one Registry and install it as the global default via `try_init`.
 ///
 /// A second call returns `PipelineError::AlreadyInit` instead of panicking. An OTLP
 /// exporter that fails to build degrades to logging-only (warn on stderr, still `Ok`).
 pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError> {
     let mut workers: Vec<WorkerGuard> = Vec::new();
-    let mut layers: Vec<Box<dyn Layer<Registry> + Send + Sync>> = Vec::new();
+    let mut layers: Vec<BoxedLayer> = Vec::new();
 
     // bunyan needs one JsonStorageLayer in the registry, added once ahead of any bunyan sink.
     #[cfg(feature = "bunyan")]
-    if cfg.logging.as_ref().is_some_and(|l| {
-        l.sinks
-            .iter()
-            .any(|s| matches!(s.format, LogFormat::Bunyan))
-    }) {
-        layers.push(tracing_bunyan_formatter::JsonStorageLayer.boxed());
+    if let Some(logging) = &cfg.logging
+        && let Some(storage) = bunyan_storage_layer(&logging.sinks, &cfg.level)
+    {
+        layers.push(storage);
     }
 
     // every OTLP provider here runs on one export runtime; `shared` hands back the live one
@@ -85,11 +83,7 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
                                 .map(|provider| (provider, runtime))
                         }) {
                             Ok((provider, runtime)) => {
-                                let bridge =
-                                    opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
-                                        &provider,
-                                    );
-                                layers.push(bridge.with_filter(env_filter(level)).boxed());
+                                layers.push(log_bridge_layer(&provider, level));
                                 logger_provider = Some(provider);
                                 export_runtime = Some(runtime);
                             }
@@ -120,9 +114,7 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
                 .map(|provider| (provider, runtime))
         }) {
             Ok((provider, runtime)) => {
-                use opentelemetry::trace::TracerProvider as _;
-                let tracer = provider.tracer("observability");
-                layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
+                layers.push(trace_layer(&provider, &cfg.level));
                 tracer_provider = Some(provider);
                 export_runtime = Some(runtime);
             }

@@ -24,7 +24,7 @@ use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
 #[cfg(feature = "otel")]
 use self::http_client::RuntimeHttpClient;
 #[cfg(feature = "otel")]
-pub(crate) use self::runtime::ExportRuntime;
+pub(crate) use self::runtime::{EXPORT_THREAD_NAME, ExportRuntime};
 #[cfg(feature = "otel")]
 use crate::error::OtlpError;
 use crate::redact::REDACTED;
