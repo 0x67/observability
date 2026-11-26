@@ -44,6 +44,8 @@ Its `Debug` output prints each header name with `[REDACTED]` in place of the val
 
 [[crates/observability/src/otlp/runtime.rs#ExportRuntime]] is the one tokio runtime (multi-thread, 1 worker, threads named `observability-otlp`) that runs every exporter's I/O, so OTLP export works with or without an app runtime. gRPC exporters are built inside its context, so tonic spawns its channel worker there. HTTP exporters send through [[crates/observability/src/otlp/http_client.rs#RuntimeHttpClient]], an async reqwest client whose requests are spawned onto that runtime.
 
+Dropping a guard shuts its OTel providers down, which exports the final batch, and logs a failed shutdown as a warning. Export runs on the export runtime, so this works from a thread with no runtime and from inside a current_thread or multi-thread app runtime, async context included. `ObsGuard` declares `metrics` before `pipeline`, so the metrics recorder shuts down first and the log sinks still print its warnings.
+
 `ExportRuntime::shared` hands out the live runtime through a `Weak` slot, so the pipeline and metrics guards share one export thread, and an init after every guard dropped starts a fresh one. Each guard holds its `Arc` behind its providers, so the runtime outlives their final flush. The last `Arc` to drop calls `shutdown_background`, which is safe inside an async context.
 
 Every configured header goes out on both transports: as HTTP headers, or as gRPC metadata through `MetadataMap::from_headers`. A header whose name or value is not valid HTTP returns `OtlpError::InvalidHeader` at init, naming the header and never its value, because opentelemetry-otlp would drop it without a word.

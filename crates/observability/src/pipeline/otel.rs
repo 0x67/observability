@@ -25,13 +25,20 @@ pub(super) struct OtelProviders {
 }
 
 impl OtelProviders {
-    pub(super) fn force_flush(&self) {
-        if let Some(p) = &self.tracer {
-            let _ = p.force_flush();
+    /// Shut each provider down, which exports its final batch, then release the runtime.
+    // the global subscriber keeps the tracer, and with it the provider, alive until exit,
+    // so the provider's own Drop never runs its shutdown
+    pub(super) fn shutdown(self) {
+        if let Some(tracer) = &self.tracer
+            && let Err(error) = tracer.shutdown()
+        {
+            tracing::warn!(signal = %Signal::Traces, %error, "OTLP provider shutdown failed");
         }
         #[cfg(feature = "otel-logs")]
-        if let Some(p) = &self.logger {
-            let _ = p.force_flush();
+        if let Some(logger) = &self.logger
+            && let Err(error) = logger.shutdown()
+        {
+            tracing::warn!(signal = %Signal::Logs, %error, "OTLP provider shutdown failed");
         }
     }
 }
