@@ -4,7 +4,7 @@ lat:
 ---
 # Tests
 
-Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`.
+Behavioral test specifications for the hot-path gate, sampler, counters, and histogram merge in `observability-core`.
 
 In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, TLS export, and guard drop.
 
@@ -45,14 +45,6 @@ Reading via `take_count` returns the accumulated count and resets the thread-loc
 A worker's recorded latencies, plus one sample above the 60s bound, merge via `merge_local`; `drain_all` on another thread sums them with the tail sample clamped into range.
 
 `drain_count` returns the matching message-count sum for the same worker, proving both registries hand off together on one `merge_local` tick.
-
-## OTel-standard field keys
-
-The `field` module ships OTel-standard attribute key constants only; no project-invented prefix is allowed to leak into the exported key set.
-
-### Field keys are dotted OTel names without a project prefix
-
-Every constant in the `field` module equals its documented OTel dotted name (for example `http.request.method`), and none contain a project-prefix marker.
 
 ## Metrics recorder guard drop behavior
 

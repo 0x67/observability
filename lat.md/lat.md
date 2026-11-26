@@ -26,13 +26,13 @@ The subsystems are coupled at runtime in two places. One is the `OtlpConfig` val
 
 `observability-core` never touches a shared atomic on the hot path once a thread has primed its gate mirror. Everything sampled per-message lives in thread-local state, merged into shared registries only on a periodic tick.
 
-The runtime gate is a process-wide [[crates/observability-core/src/lib.rs#METRICS_ON]] `AtomicBool`, mirrored per-thread into a `Cell<Option<bool>>` refreshed via `refresh_thread_gate`. The hot-path check reads the thread-local mirror first and only falls back to the shared atomic before that mirror has ever been primed on the calling thread.
+The runtime gate is a process-wide [[crates/observability-core/src/gate.rs#METRICS_ON]] `AtomicBool`, mirrored per-thread into a `Cell<Option<bool>>` refreshed via `refresh_thread_gate`. The hot-path check reads the thread-local mirror first and only falls back to the shared atomic before that mirror has ever been primed on the calling thread.
 
 Latency samples land in a thread-local bounded `hdrhistogram::Histogram` (1ns..60s, 3 sig figs, `saturating_record` so a tail spike clamps into range instead of panicking) via [[crates/observability-core/src/lib.rs#record_latency_ns]]. [[crates/observability-core/src/lib.rs#merge_local]] hands that thread's histogram, plus its message count, into a registry-backed shared slot: one slot per thread that has ever merged. [[crates/observability-core/src/lib.rs#drain_all]] folds every registered slot into one snapshot and clears each slot in place, so a flusher on another thread only ever sees data a worker thread has already merged, never a worker's live local state.
 
 Message counting mirrors the same shape: a plain per-thread `Cell<u64>` on the hot path (`count_msg`/`take_count`), never a shared atomic, drained into the shared registry alongside the histogram on the same `merge_local` tick.
 
-[[crates/observability-core/src/lib.rs#should_sample]] is a per-thread wraparound sampler (`mask` must be `2^n - 1`, e.g. `SAMPLE_1_IN_8192`) for hot-path call sites that need periodic-not-every-message sampling. It samples true on a fresh thread's very first call, then exactly once per `mask + 1` consecutive calls after that.
+[[crates/observability-core/src/sample.rs#should_sample]] is a per-thread wraparound sampler (`mask` must be `2^n - 1`, e.g. `SAMPLE_1_IN_8192`) for hot-path call sites that need periodic-not-every-message sampling. It samples true on a fresh thread's very first call, then exactly once per `mask + 1` consecutive calls after that.
 
 ## Shared OTLP, three sibling exporters
 
@@ -68,4 +68,4 @@ The whole otel stack pins to opentelemetry 0.31: `metrics-exporter-otel` 0.3.1 p
 
 Related sections outside this file:
 
-- [[tests]] documents test specifications for the runtime gate, sampler, per-thread counters, histogram merge, and OTel field keys.
+- [[tests]] documents test specifications for the runtime gate, sampler, per-thread counters, and histogram merge.
