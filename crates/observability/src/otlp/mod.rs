@@ -153,14 +153,15 @@ impl OtlpConfig {
     where
         B: WithExportConfig + WithTonicConfig,
     {
+        // connect_lazy spawns the channel worker onto the runtime current at build time,
+        // whether opentelemetry-otlp builds the channel or `platform_channel` does
+        let _entered = runtime.handle().enter();
+
         let builder = builder
             .with_endpoint(&self.endpoint)
             .with_timeout(self.timeout)
             .with_metadata(MetadataMap::from_headers(self.header_map()?));
         let builder = self.with_grpc_tls(builder)?;
-
-        // connect_lazy spawns the channel worker onto the runtime current at build time
-        let _entered = runtime.handle().enter();
         build(builder).map_err(OtlpError::build)
     }
 
@@ -199,12 +200,30 @@ impl OtlpConfig {
     fn with_grpc_tls<B: WithTonicConfig>(&self, builder: B) -> Result<B, OtlpError> {
         #[cfg(feature = "tls")]
         if let Some(tls) = self.tls_material()? {
+            #[cfg(feature = "tls-platform-verifier")]
+            if tls.uses_platform_verifier() {
+                return Ok(builder.with_channel(self.platform_channel(&tls)?));
+            }
             return Ok(builder.with_tls_config(tls.tonic_config()));
         }
         #[cfg(not(feature = "tls"))]
         self.reject_https()?;
 
         Ok(builder)
+    }
+
+    /// A channel whose TLS goes through the OS verifier. tonic's `ClientTlsConfig` has no
+    /// verifier hook but `Endpoint` does, and opentelemetry-otlp still adds the configured
+    /// metadata to a channel it is given.
+    #[cfg(feature = "tls-platform-verifier")]
+    fn platform_channel(&self, tls: &TlsMaterial) -> Result<tonic::transport::Channel, OtlpError> {
+        let (config, verifier) = tls.platform_tonic()?;
+        let endpoint = tonic::transport::Channel::from_shared(self.endpoint.clone())
+            .map_err(OtlpError::build)?
+            .timeout(self.timeout)
+            .tls_config_with_verifier(config, verifier)
+            .map_err(OtlpError::build)?;
+        Ok(endpoint.connect_lazy())
     }
 
     /// TLS material for an `https://` endpoint; `None` keeps the connection plain text.
@@ -350,6 +369,34 @@ mod tests {
             (OtlpProtocol::HttpProtobuf, "https://collector:4318"),
         ] {
             if let Err(e) = exporter_config(protocol, endpoint).span_exporter(&runtime) {
+                panic!("{protocol:?} {endpoint}: {e}");
+            }
+        }
+    }
+
+    #[cfg(feature = "tls-platform-verifier")]
+    #[test]
+    fn platform_roots_build_both_transports() {
+        use std::sync::PoisonError;
+
+        use super::{ExportRuntime, TlsRoots, runtime::tests::SLOT_LOCK};
+
+        let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+        for (protocol, endpoint) in [
+            (OtlpProtocol::Grpc, "https://collector:4317"),
+            (OtlpProtocol::HttpProtobuf, "https://collector:4318"),
+        ] {
+            let cfg = OtlpConfig {
+                tls: OtlpTls {
+                    roots: TlsRoots::Platform,
+                    ..OtlpTls::default()
+                },
+                ..exporter_config(protocol, endpoint)
+            };
+
+            if let Err(e) = cfg.span_exporter(&runtime) {
                 panic!("{protocol:?} {endpoint}: {e}");
             }
         }

@@ -34,6 +34,10 @@ async-trait = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 # `tls`: checks the OS store at init so both transports fail the same way when it is empty.
 rustls-native-certs = { workspace = true, optional = true }
+# `tls-platform-verifier`: the OS certificate verifier on both transports.
+rustls-platform-verifier = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true }
 # per-signal / per-exporter.
 opentelemetry-appender-tracing = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
@@ -70,6 +74,14 @@ tls-webpki-roots = [
   "opentelemetry-otlp?/tls-webpki-roots",
   "reqwest?/rustls-tls-webpki-roots",
 ]
+# The OS verifier (Security.framework, Windows, Android, or webpki over the OS store), for
+# desktop and mobile apps. Android apps must also run the verifier's JNI init.
+tls-platform-verifier = [
+  "tls",
+  "dep:rustls-platform-verifier",
+  "dep:rustls",
+  "dep:tonic",
+]
 otel-traces = ["otel"]
 otel-logs = ["otel", "dep:opentelemetry-appender-tracing"]
 metrics-prom = ["dep:metrics-exporter-prometheus"]
@@ -79,7 +91,7 @@ bunyan = ["dep:tracing-bunyan-formatter"]
 [dev-dependencies]
 rcgen = { workspace = true }
 rustls = { workspace = true }
-tonic = { workspace = true, features = ["transport", "router", "tls-ring"] }
+tonic = { workspace = true, features = ["transport", "router", "codegen", "tls-ring"] }
 opentelemetry-proto = { workspace = true, features = [
   "gen-tonic",
   "trace",
