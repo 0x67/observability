@@ -32,9 +32,6 @@ metrics-exporter-prometheus = { workspace = true, optional = true }
 metrics-exporter-otel = { workspace = true, optional = true }
 tracing-bunyan-formatter = { workspace = true, optional = true }
 
-[dev-dependencies]
-tokio = { workspace = true }
-
 # Signal features are named to never collide with the `tracing` / `metrics` crate deps.
 # `otel` is the grouping feature that pulls the SDK + OTLP transport; every
 # `#[cfg(feature = "otel")]` block resolves against it.
