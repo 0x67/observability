@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`.
 
-In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, and the rolling file sink.
+In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, and OTLP headers.
 
 ## Runtime gate
 
@@ -135,3 +135,19 @@ A temp dir holding `app.2020-01-01` to `app.2020-01-04`, opened as a daily `app`
 ### Rolling file in unwritable dir returns err
 
 A rolling sink whose `dir` sits below a regular file returns `PipelineError::RollingFile` with that `dir`, without a panic and without setting a subscriber.
+
+## OTLP headers
+
+Configured headers reach the collector on both transports, and an invalid header fails init without leaking its value.
+
+### gRPC export without app runtime sends headers as metadata
+
+From a plain test thread with no tokio runtime, headers `x-api-key: k1` and `X-Tenant: t1` over gRPC reach the gRPC mock collector as metadata `x-api-key: k1` and `x-tenant: t1`, along with the span.
+
+### HTTP export sends configured headers
+
+From a test thread with no tokio runtime, header `x-api-key: k1` over HTTP reaches the HTTP mock collector with the span.
+
+### Invalid header is rejected on both protocols
+
+A header named `x api`, or `x-api-key` with value `k1` plus a newline, returns `OtlpError::InvalidHeader` with that name on gRPC and HTTP, and the error text omits the value.

@@ -20,7 +20,9 @@ use std::{fmt, time::Duration};
 #[cfg(feature = "otel")]
 use opentelemetry::KeyValue;
 #[cfg(feature = "otel")]
-use opentelemetry_otlp::{WithExportConfig, WithHttpConfig, WithTonicConfig};
+use opentelemetry_otlp::{
+    WithExportConfig, WithHttpConfig, WithTonicConfig, tonic_types::metadata::MetadataMap,
+};
 
 #[cfg(feature = "otel")]
 use self::http_client::RuntimeHttpClient;
@@ -140,11 +142,8 @@ impl OtlpConfig {
         }
     }
 
-    /// Setup shared by every gRPC exporter: endpoint, timeout, and the runtime context
-    /// tonic spawns its channel worker into.
-    // NOTE: headers wired on http only; tonic's MetadataKey isn't re-exported by
-    // opentelemetry-otlp (only MetadataMap is), so a dynamic key needs `tonic` as a
-    // direct dep, which this crate does not take.
+    /// Setup shared by every gRPC exporter: endpoint, timeout, headers as metadata, TLS,
+    /// and the runtime context tonic spawns its channel worker into.
     fn grpc<B, E>(
         &self,
         builder: B,
@@ -156,7 +155,8 @@ impl OtlpConfig {
     {
         let builder = builder
             .with_endpoint(&self.endpoint)
-            .with_timeout(self.timeout);
+            .with_timeout(self.timeout)
+            .with_metadata(MetadataMap::from_headers(self.header_map()?));
         let builder = self.with_grpc_tls(builder)?;
 
         // connect_lazy spawns the channel worker onto the runtime current at build time
@@ -171,6 +171,8 @@ impl OtlpConfig {
         builder: B,
         runtime: &ExportRuntime,
     ) -> Result<B, OtlpError> {
+        // opentelemetry-otlp drops an invalid header without a word, so reject it here
+        self.header_map()?;
         let client = RuntimeHttpClient::new(self.reqwest_client()?, runtime.handle().clone());
 
         Ok(builder
@@ -227,6 +229,19 @@ impl OtlpConfig {
             .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
     }
 
+    /// Validated headers. The error names the header and never carries its value.
+    fn header_map(&self) -> Result<http::HeaderMap, OtlpError> {
+        self.headers
+            .iter()
+            .map(|(name, value)| {
+                let invalid = || OtlpError::InvalidHeader { name: name.clone() };
+                let name = http::HeaderName::try_from(name.as_str()).map_err(|_| invalid())?;
+                let value = http::HeaderValue::try_from(value.as_str()).map_err(|_| invalid())?;
+                Ok((name, value))
+            })
+            .collect()
+    }
+
     /// Headers as a map for the http transport's `with_headers`.
     fn http_headers(&self) -> std::collections::HashMap<String, String> {
         self.headers.iter().cloned().collect()
@@ -251,7 +266,7 @@ mod tests {
     use super::{OtlpConfig, OtlpProtocol, OtlpTls};
 
     #[cfg(feature = "otel")]
-    fn https_config(protocol: OtlpProtocol, endpoint: &str) -> OtlpConfig {
+    fn exporter_config(protocol: OtlpProtocol, endpoint: &str) -> OtlpConfig {
         OtlpConfig {
             endpoint: endpoint.to_owned(),
             protocol,
@@ -278,13 +293,44 @@ mod tests {
             (OtlpProtocol::HttpProtobuf, "https://collector:4318"),
             (OtlpProtocol::Grpc, "HTTPS://collector:4317"),
         ] {
-            let built = https_config(protocol, endpoint).span_exporter(&runtime);
+            let built = exporter_config(protocol, endpoint).span_exporter(&runtime);
 
             assert!(
                 matches!(built, Err(OtlpError::FeatureDisabled { feature: "tls" })),
                 "{protocol:?} {endpoint}: {:?}",
                 built.err()
             );
+        }
+    }
+
+    // @lat: [[tests#OTLP headers#Invalid header is rejected on both protocols]]
+    #[cfg(feature = "otel")]
+    #[test]
+    fn invalid_header_is_rejected_on_both_protocols() {
+        use std::sync::PoisonError;
+
+        use super::{ExportRuntime, runtime::tests::SLOT_LOCK};
+        use crate::error::OtlpError;
+
+        let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+        for (name, value) in [("x api", "k1"), ("x-api-key", "k1\n")] {
+            for protocol in [OtlpProtocol::Grpc, OtlpProtocol::HttpProtobuf] {
+                let cfg = OtlpConfig {
+                    headers: vec![(name.to_owned(), value.to_owned())],
+                    ..exporter_config(protocol, "http://127.0.0.1:4317")
+                };
+
+                let err = cfg.span_exporter(&runtime).err();
+
+                let Some(err @ OtlpError::InvalidHeader { name: named }) = &err else {
+                    panic!("{protocol:?} {name:?}: {err:?}");
+                };
+                assert_eq!(named, name);
+                let text = err.to_string();
+                assert!(text.contains(name) && !text.contains("k1"), "{text}");
+            }
         }
     }
 
@@ -303,7 +349,7 @@ mod tests {
             (OtlpProtocol::Grpc, "https://collector:4317"),
             (OtlpProtocol::HttpProtobuf, "https://collector:4318"),
         ] {
-            if let Err(e) = https_config(protocol, endpoint).span_exporter(&runtime) {
+            if let Err(e) = exporter_config(protocol, endpoint).span_exporter(&runtime) {
                 panic!("{protocol:?} {endpoint}: {e}");
             }
         }
