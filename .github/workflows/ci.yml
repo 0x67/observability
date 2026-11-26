@@ -12,6 +12,8 @@ permissions:
 jobs:
   rust:
     uses: 0x67/ci/.github/workflows/rust-ci.yml@8f369fc7a2dc99282afb6d68df07349dda365a9b # main on 2026-11-26
+    with:
+      workspace-args: --all-features
 
   # guard feature-flag combos build + observability-core stays free of
   # opentelemetry/tracing-subscriber (heavy backends belong in leaf crate only).
