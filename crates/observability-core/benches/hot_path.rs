@@ -20,7 +20,7 @@ use std::{
 
 use hdrhistogram::Histogram;
 use observability_core::{
-    SAMPLE_1_IN_8192, count_msg, drain_all, drain_count, merge_local, metrics_enabled,
+    LatencyWindow, SAMPLE_1_IN_8192, count_msg, drain_into, merge_local, metrics_enabled,
     record_latency_ns, set_metrics_enabled, should_sample,
 };
 
@@ -49,10 +49,11 @@ fn main() {
     );
 
     // drain rows run first, so the main thread holds no slot and each row sees exactly n slots
+    let mut window = LatencyWindow::default();
     let mut pool = HelperPool::new();
     for slots in [1, 8, 64] {
         pool.grow_to(slots);
-        let hist = measure(1, || pool.fill(), drain);
+        let hist = measure(1, || pool.fill(), || drain(&mut window));
         print_row(&format!("drain, {slots} live slots"), 1, &hist);
     }
     pool.stop();
@@ -106,7 +107,7 @@ fn main() {
         &measure(1, || record_latency_ns(1_000), merge_local),
     );
 
-    churn();
+    churn(&mut window);
 }
 
 fn clock_overhead() -> Histogram<u64> {
@@ -132,9 +133,8 @@ fn measure(batch: u32, mut setup: impl FnMut(), mut call: impl FnMut()) -> Histo
     hist
 }
 
-fn drain() {
-    black_box(drain_all());
-    black_box(drain_count());
+fn drain(window: &mut LatencyWindow) {
+    black_box(drain_into(window));
 }
 
 fn print_row(name: &str, batch: u32, hist: &Histogram<u64>) {
@@ -199,9 +199,11 @@ impl HelperPool {
     }
 }
 
-/// Short-lived recording threads, then one drain: shows whether exited threads keep memory.
-fn churn() {
+/// Rounds of short-lived recording threads with one drain after each, as a flusher tick would
+/// run: shows whether exited threads keep memory and slow the drain.
+fn churn(window: &mut LatencyWindow) {
     let before = rss_kib();
+    let mut drain_ns = 0;
     for _ in 0..CHURN_ROUNDS {
         let threads: Vec<_> = (0..CHURN_THREADS)
             .map(|_| {
@@ -214,21 +216,23 @@ fn churn() {
         for handle in threads {
             handle.join().expect("churn thread panicked");
         }
+        let start = Instant::now();
+        drain(window);
+        drain_ns = nanos(start);
     }
-    let start = Instant::now();
-    drain();
-    let drain_ns = nanos(start);
     let after = rss_kib();
 
     let threads = CHURN_ROUNDS * CHURN_THREADS;
-    println!("\nchurn: {threads} threads, each records 1 sample and merges, then exits");
+    println!(
+        "\nchurn: {threads} threads in {CHURN_ROUNDS} rounds, each records 1 sample and merges, then exits; one drain per round"
+    );
     println!("churn rss before (KiB): {}", show(before));
     println!("churn rss after (KiB):  {}", show(after));
     match (before, after) {
         (Some(b), Some(a)) => println!("churn rss growth (KiB): {}", a as i64 - b as i64),
         _ => println!("churn rss growth (KiB): n/a"),
     }
-    println!("churn drain after exit (ns): {drain_ns}");
+    println!("churn last drain (ns): {drain_ns}");
 }
 
 fn rss_kib() -> Option<u64> {

@@ -17,7 +17,9 @@ pub mod field;
 #[cfg(feature = "flush-tokio")]
 pub use flush::spawn_flusher;
 pub use gate::{metrics_enabled, set_metrics_enabled};
-pub use handoff::{count_msg, drain_all, drain_count, merge_local, record_latency_ns, take_count};
+pub use handoff::{
+    LatencyWindow, count_msg, drain_into, merge_local, record_latency_ns, take_count,
+};
 pub use sample::{SAMPLE_1_IN_8192, should_sample};
 pub use timer::{Timer, timer};
 

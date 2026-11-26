@@ -9,9 +9,9 @@ backend wiring lives one crate up, in [`observability`](../observability).
 
 The hot path writes only thread-local state. Its one shared read is the gate flag, which is
 written rarely and so stays in each core's cache. Everything sampled per-message lives in
-thread-local state and merges into shared registries only on a
-periodic tick, so a flusher on another thread only ever sees data a worker already handed off,
-never a worker's live local state.
+thread-local state and moves to one shared slot per thread only on a periodic tick or at thread
+exit. A flusher on another thread sees only data a worker already handed off, never a worker's
+live local state.
 
 ## Runtime gate
 
@@ -60,18 +60,23 @@ if should_sample(SAMPLE_1_IN_8192) {
 
 ## Cross-thread aggregation
 
-Per-thread state merges into shared registries on a worker tick, then a flusher drains them.
+Each thread hands its samples and message count to one shared slot, on a worker tick or when the
+thread exits. A reader drains every slot into a window it owns.
 
 ```rust
-pub fn merge_local();                 // fold this thread's histogram + count into its shared slots
-pub fn drain_all() -> Histogram<u64>; // fold every registered histogram into one snapshot, clearing each
-pub fn drain_count() -> u64;          // sum every merged count, zeroing each slot
+pub fn merge_local();                                 // hand this thread's samples + count to its slot
+pub struct LatencyWindow;                             // Default; histogram() -> &Histogram<u64>, in ns
+pub fn drain_into(window: &mut LatencyWindow) -> u64; // reset, fill from every slot, return msg count
 ```
 
-The first `merge_local` on a thread registers a fresh shared histogram and count slot. `drain_*`
-only see data already handed off via `merge_local`; a thread that never merges never contributes.
-Poisoned mutexes are recovered rather than propagated, so telemetry survives a panicked holder.
-Each worker thread must call `merge_local` on its own tick.
+A thread registers its slot on its first hand-off with data. A merge with nothing pending touches
+no shared state. When a thread exits, it hands off whatever it has not merged and retires its
+slot, and the first drain after that removes the slot. Short-lived threads therefore do not grow
+memory, and no sample is lost at exit.
+
+`drain_into` sees only data already handed off, never a thread's live local state. Reuse one
+`LatencyWindow` across drains, so a periodic reader does not allocate. Poisoned mutexes are
+recovered rather than propagated, and telemetry survives a panicked holder.
 
 ## Optional tokio flusher
 
