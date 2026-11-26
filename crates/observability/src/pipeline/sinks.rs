@@ -1,3 +1,6 @@
+use std::{num::NonZeroUsize, path::Path};
+
+use tracing_appender::rolling::{self, RollingFileAppender};
 #[cfg(feature = "bunyan")]
 use tracing_bunyan_formatter::JsonStorageLayer;
 use tracing_subscriber::Layer;
@@ -12,18 +15,37 @@ use crate::{
     error::PipelineError,
 };
 
+/// The file appender for a rolling sink. A directory that cannot be created or opened is
+/// an error, not a panic.
 pub(super) fn rolling_appender(
-    dir: &std::path::Path,
+    dir: &Path,
     prefix: &str,
-    rotation: &Rotation,
-) -> tracing_appender::rolling::RollingFileAppender {
-    let rot = match rotation {
-        Rotation::Minutely => tracing_appender::rolling::Rotation::MINUTELY,
-        Rotation::Hourly => tracing_appender::rolling::Rotation::HOURLY,
-        Rotation::Daily => tracing_appender::rolling::Rotation::DAILY,
-        Rotation::Never => tracing_appender::rolling::Rotation::NEVER,
+    rotation: Rotation,
+    max_files: Option<NonZeroUsize>,
+) -> Result<RollingFileAppender, PipelineError> {
+    let builder = RollingFileAppender::builder()
+        .rotation(appender_rotation(rotation))
+        .filename_prefix(prefix);
+    let builder = match max_files {
+        Some(n) => builder.max_log_files(n.get()),
+        None => builder,
     };
-    tracing_appender::rolling::RollingFileAppender::new(rot, dir, prefix)
+
+    builder
+        .build(dir)
+        .map_err(|source| PipelineError::RollingFile {
+            dir: dir.to_path_buf(),
+            source: Box::new(source),
+        })
+}
+
+fn appender_rotation(rotation: Rotation) -> rolling::Rotation {
+    match rotation {
+        Rotation::Minutely => rolling::Rotation::MINUTELY,
+        Rotation::Hourly => rolling::Rotation::HOURLY,
+        Rotation::Daily => rolling::Rotation::DAILY,
+        Rotation::Never => rolling::Rotation::NEVER,
+    }
 }
 
 // `service` feeds the bunyan formatter's app-name field; unused when that feature is off.
@@ -73,16 +95,43 @@ pub(super) fn bunyan_storage_layer(sinks: &[LogSink], fallback_level: &str) -> O
         .map(|filter| JsonStorageLayer.with_filter(filter).boxed())
 }
 
-#[cfg(all(test, feature = "bunyan"))]
+#[cfg(test)]
 mod tests {
-    use tracing_subscriber::{Layer, filter::LevelFilter};
+    use std::{fs, num::NonZeroUsize};
 
-    use super::{super::filter::tests::with_rust_log, bunyan_storage_layer};
-    use crate::config::{LogFormat, LogSink, LogSinkKind};
+    use super::rolling_appender;
+    use crate::config::Rotation;
+
+    // @lat: [[tests#Rolling file sink#Rolling appender prunes to max files]]
+    #[test]
+    fn rolling_appender_prunes_to_max_files() {
+        let dir = std::env::temp_dir().join(format!("obs-prune-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create the temp log dir");
+        for day in 1..=4 {
+            fs::write(dir.join(format!("app.2020-01-0{day}")), "old").expect("write an old log");
+        }
+
+        let appender = rolling_appender(&dir, "app", Rotation::Daily, NonZeroUsize::new(2));
+
+        let kept = fs::read_dir(&dir)
+            .expect("read the temp log dir")
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("app"))
+            .count();
+        drop(appender);
+        fs::remove_dir_all(&dir).expect("remove the temp log dir");
+        assert!(kept <= 2, "{kept} files kept");
+    }
 
     // @lat: [[tests#OTLP layer filters#Bunyan storage layer hint follows most verbose bunyan sink]]
+    #[cfg(feature = "bunyan")]
     #[test]
     fn bunyan_storage_layer_hint_follows_most_verbose_bunyan_sink() {
+        use tracing_subscriber::{Layer, filter::LevelFilter};
+
+        use super::{super::filter::tests::with_rust_log, bunyan_storage_layer};
+        use crate::config::{LogFormat, LogSink, LogSinkKind};
+
         let sink = |format, level: &str| LogSink {
             kind: LogSinkKind::Stdout,
             format,

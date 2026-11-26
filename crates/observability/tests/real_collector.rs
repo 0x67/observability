@@ -46,6 +46,7 @@ fn https_export_reaches_real_collector() {
                     dir: log_dir.clone(),
                     prefix: "export".to_owned(),
                     rotation: Rotation::Never,
+                    max_files: None,
                 },
                 format: LogFormat::Json,
                 level: None,

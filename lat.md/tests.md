@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`.
 
-In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, and the init contract.
+In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, and the rolling file sink.
 
 ## Runtime gate
 
@@ -123,3 +123,15 @@ Tracing over HTTP to `http://exa mple:4318` returns `PipelineError::Exporter` wi
 ### OTLP metrics with invalid endpoint returns exporter error
 
 `init_metrics` with the OTLP exporter over gRPC to `http://exa mple:4317` returns `MetricsError::Exporter(OtlpError::Build(_))` and leaves the metrics gate off.
+
+## Rolling file sink
+
+A rolling file sink fails init with a typed error instead of a panic, and keeps at most `max_files` files with its prefix.
+
+### Rolling appender prunes to max files
+
+A temp dir holding `app.2020-01-01` to `app.2020-01-04`, opened as a daily `app` sink with `max_files = 2`, holds at most 2 files with prefix `app` once the appender is built.
+
+### Rolling file in unwritable dir returns err
+
+A rolling sink whose `dir` sits below a regular file returns `PipelineError::RollingFile` with that `dir`, without a panic and without setting a subscriber.

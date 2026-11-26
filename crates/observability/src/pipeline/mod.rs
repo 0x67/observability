@@ -70,7 +70,10 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
                 dir,
                 prefix,
                 rotation,
-            } => tracing_appender::non_blocking(rolling_appender(dir, prefix, rotation)),
+                max_files,
+            } => tracing_appender::non_blocking(rolling_appender(
+                dir, prefix, *rotation, *max_files,
+            )?),
             // the OTLP log bridge is built with the other OTel layers below
             LogSinkKind::Otlp => continue,
         };

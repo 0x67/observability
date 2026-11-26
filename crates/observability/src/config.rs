@@ -1,7 +1,7 @@
 //! Plain-data pipeline config. No `opentelemetry` type in any field; `otlp.rs` is the
 //! only module allowed to know about the SDK.
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, num::NonZeroUsize, path::PathBuf};
 
 use crate::otlp::OtlpConfig;
 
@@ -37,6 +37,9 @@ pub enum LogSinkKind {
         dir: PathBuf,
         prefix: String,
         rotation: Rotation,
+        /// Most files with this prefix kept in `dir`, pruned when the sink opens and on
+        /// each rotation; `None` keeps every file.
+        max_files: Option<NonZeroUsize>,
     },
     Otlp,
 }
