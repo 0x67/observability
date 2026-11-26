@@ -8,8 +8,8 @@ mod http_collector;
 use std::time::Duration;
 
 use observability::{
-    LogFormat, LogSink, LogSinkKind, LoggingConfig, OtlpConfig, OtlpProtocol, PipelineConfig,
-    init_pipeline,
+    LogFormat, LogSink, LogSinkKind, LoggingConfig, OtlpConfig, OtlpProtocol, OtlpTls,
+    PipelineConfig, init_pipeline,
 };
 
 // @lat: [[tests#OTLP layer filters#Log bridge drops exporter thread events]]
@@ -27,6 +27,7 @@ fn log_bridge_drops_exporter_thread_events() {
             headers: Vec::new(),
             resource: Vec::new(),
             timeout: Duration::from_secs(5),
+            tls: OtlpTls::default(),
         }),
         logging: Some(LoggingConfig {
             sinks: vec![LogSink {

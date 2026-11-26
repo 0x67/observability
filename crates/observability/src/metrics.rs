@@ -193,7 +193,10 @@ mod tests {
     fn otlp_metrics_with_invalid_endpoint_returns_exporter_error() {
         use std::time::Duration;
 
-        use crate::{error::OtlpError, otlp::OtlpProtocol};
+        use crate::{
+            error::OtlpError,
+            otlp::{OtlpProtocol, OtlpTls},
+        };
 
         let _lock = GATE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let otlp = OtlpConfig {
@@ -202,6 +205,7 @@ mod tests {
             headers: Vec::new(),
             resource: Vec::new(),
             timeout: Duration::from_secs(1),
+            tls: OtlpTls::default(),
         };
         let cfg = MetricsConfig {
             exporter: MetricsExporter::Otlp,

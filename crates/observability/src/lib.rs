@@ -28,7 +28,7 @@ pub use observability_core;
 pub use observability_core::{
     METRICS_ON, metrics_enabled, refresh_thread_gate, set_metrics_enabled,
 };
-pub use otlp::{OtlpConfig, OtlpProtocol};
+pub use otlp::{ClientCert, OtlpConfig, OtlpProtocol, OtlpTls, TlsRoots};
 pub use pipeline::{PipelineGuard, init_pipeline};
 
 /// Both subsystems in one value. `metrics` is optional so a build can run logging + tracing

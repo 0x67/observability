@@ -29,6 +29,7 @@ use std::time::Duration;
 use observability::{
     init, ObsConfig, PipelineConfig, LoggingConfig, LogSink, LogSinkKind, LogFormat,
     TracingConfig, TraceExporter, MetricsConfig, MetricsExporter, OtlpConfig, OtlpProtocol,
+    OtlpTls,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         headers: vec![],
         resource: vec![("deployment.environment".into(), "prod".into())],
         timeout: Duration::from_secs(5),
+        tls: OtlpTls::default(),
     };
 
     let cfg = ObsConfig {
