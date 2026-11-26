@@ -86,6 +86,36 @@ A thread that counts one message and merges registers exactly one slot. The next
 
 A thread-local destructor that runs after the core's thread-local state is gone calls `record_latency_ns`, `count_msg`, and `merge_local`. Each call drops its data, and the thread joins without a panic.
 
+## Tokio flusher
+
+Flusher tests run a current-thread runtime with paused time and read metrics from a `DebuggingRecorder` set with `metrics::with_local_recorder`. They hold `TEST_STATE`, because the slots and the running flag are process-wide.
+
+### Publishes window quantiles in seconds
+
+A worker records 100 samples of 1 ms, one of 50 ms, and 7 messages, merges, and exits. One 10 s window later, the gauges report those values in seconds.
+
+`lat.p50` is within 1% of 0.001, `lat.max` within 1% of 0.05, `lat.samples` is 101, and `msgs` is 7. `lat.p99` is described with `Unit::Seconds` and `lat.samples` with `Unit::Count`. A second window of ten 2 ms samples moves `lat.p50` to within 1% of 0.002 through the same handles.
+
+### Empty window keeps last quantiles
+
+After the first window above, a window with no samples sets `lat.samples` to 0 and leaves `lat.p50` within 1% of 0.001.
+
+### Spawn outside a runtime returns NoRuntime
+
+With no runtime, `spawn_flusher` returns `FlusherError::NoRuntime`. A following call inside a runtime succeeds, which shows the failed call left the running flag clear.
+
+### Second spawn while running is refused
+
+While the first `Flusher` is alive, a second `spawn_flusher` returns `FlusherError::AlreadyRunning`.
+
+### Dropping the handle allows a respawn
+
+After the `Flusher` is dropped, a worker merges one sample and one message, and 30 s of paused time pass without the `msgs` counter moving. A new `spawn_flusher` then succeeds.
+
+### Zero interval is refused
+
+`spawn_flusher` with `Duration::ZERO` returns `FlusherError::ZeroInterval` instead of letting tokio panic.
+
 ## Hot-path allocation
 
 `tests/hot_path_alloc.rs` installs a global allocator that counts each thread's `alloc` and `realloc` calls, so any allocation on the per-message path fails the build's tests.

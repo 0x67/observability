@@ -85,14 +85,36 @@ observability-core = { git = "...", tag = "observability-core-v0.2.0", features 
 ```
 
 ```rust
-// from an async context
-observability_core::spawn_flusher("feed.decode_latency", "feed.msgs");
+use std::time::Duration;
+
+// inside a tokio runtime, after `observability::init` or another `metrics` recorder install
+let flusher = observability_core::spawn_flusher(
+    "feed.decode_latency",
+    "feed.msgs",
+    Duration::from_secs(15), // the scrape or export interval
+)?;
+// dropping `flusher` stops the task
 ```
 
-`spawn_flusher` runs a 100ms tokio loop that drains the histograms into `p50` / `p99` / `p999`
-gauges and the counts into a counter, all via the `metrics` facade. Gauge quantiles do not
-re-aggregate across process instances (averaging p99 across processes is wrong math); it targets
-a single-process feed handler. This is the only feature and the only thing that pulls in `tokio`.
+Once per `interval` the flusher drains every slot into one window. It adds the drained message
+count to the `feed.msgs` counter and sets five gauges: `feed.decode_latency.p50`, `.p99`,
+`.p999`, and `.max` in seconds, plus `.samples`, the number of samples in the window. The
+`.p50`, `.p99`, `.p999`, and `.max` gauges are described with `Unit::Seconds`, and `.samples`
+with `Unit::Count`. A window with no samples sets `.samples` to 0 and leaves the latency gauges
+at their last value, so an idle period never reads as 0 s.
+
+Call `spawn_flusher` after the recorder install. It builds its metric handles once, and handles
+built before an install are no-ops. Set `interval` to the scrape or export interval: each scrape
+then reads one whole window, and no window falls between two scrapes.
+
+`spawn_flusher` returns `FlusherError::NoRuntime` outside a tokio runtime, `ZeroInterval` for a
+zero interval, and `AlreadyRunning` while a `Flusher` from an earlier call is alive. It panics
+when the runtime was built without its time driver.
+
+The gauges describe one process. Quantiles do not combine across instances (averaging p99
+across processes is wrong math), and the flusher doesn't publish per-bucket counters, so it suits
+a single-process service. This is the only feature and the only thing that pulls in `tokio`, and
+it enables only tokio's `rt` and `time` features.
 
 ## Field keys
 
