@@ -42,6 +42,8 @@ Message counting mirrors the same shape: a plain per-thread `Cell<u64>` on the h
 
 [[crates/observability/src/otlp/mod.rs#OtlpConfig]] is the single source of endpoint, protocol, headers, resource attrs, timeout, and TLS for every OTLP signal.
 
+`endpoint` is the collector base URL. HTTP export drops one trailing `/` and appends `/v1/traces`, `/v1/logs`, or `/v1/metrics`, because opentelemetry-otlp sends to a programmatic HTTP endpoint as given. gRPC uses the endpoint unchanged, since the service path is part of each gRPC method.
+
 Its `Debug` output prints each header name with `[REDACTED]` in place of the value, because header values usually carry API keys. `PipelineConfig` derives `Debug` and embeds the `OtlpConfig`, so `?cfg` in a log line is safe for both.
 
 `pipeline/otel.rs` and `metrics.rs` each call its exporter builders directly: `span_exporter` for tracing, `metric_exporter` (under `metrics-otel`) for the metrics bridge, `log_exporter` (under `otel-logs`) for the log bridge layer, all off the same endpoint/timeout/headers pair. No `opentelemetry` type crosses into a public `observability` signature; the builders stay `pub(crate)` and otel-gated.

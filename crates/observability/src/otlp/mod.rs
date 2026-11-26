@@ -40,6 +40,8 @@ use crate::redact::REDACTED;
 /// `Debug` prints header names with `[REDACTED]` in place of each value.
 #[derive(Clone)]
 pub struct OtlpConfig {
+    /// Collector base URL. HTTP export appends `/v1/traces`, `/v1/logs`, or `/v1/metrics`
+    /// after dropping one trailing `/`; gRPC uses it as given.
     pub endpoint: String,
     pub protocol: OtlpProtocol,
     pub headers: Vec<(String, String)>,
@@ -69,6 +71,13 @@ impl fmt::Debug for OtlpConfig {
     }
 }
 
+#[cfg(feature = "otel")]
+const TRACES_PATH: &str = "/v1/traces";
+#[cfg(feature = "otel-logs")]
+const LOGS_PATH: &str = "/v1/logs";
+#[cfg(feature = "metrics-otel")]
+const METRICS_PATH: &str = "/v1/metrics";
+
 /// Wire transport for the OTLP exporters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OtlpProtocol {
@@ -89,7 +98,7 @@ impl OtlpConfig {
                 self.grpc(SpanExporter::builder().with_tonic(), runtime, |b| b.build())
             }
             OtlpProtocol::HttpProtobuf => self
-                .http(SpanExporter::builder().with_http(), runtime)?
+                .http(SpanExporter::builder().with_http(), runtime, TRACES_PATH)?
                 .build()
                 .map_err(OtlpError::build),
         }
@@ -118,6 +127,7 @@ impl OtlpConfig {
                         .with_http()
                         .with_temporality(Temporality::default()),
                     runtime,
+                    METRICS_PATH,
                 )?
                 .build()
                 .map_err(OtlpError::build),
@@ -136,7 +146,7 @@ impl OtlpConfig {
                 self.grpc(LogExporter::builder().with_tonic(), runtime, |b| b.build())
             }
             OtlpProtocol::HttpProtobuf => self
-                .http(LogExporter::builder().with_http(), runtime)?
+                .http(LogExporter::builder().with_http(), runtime, LOGS_PATH)?
                 .build()
                 .map_err(OtlpError::build),
         }
@@ -165,12 +175,13 @@ impl OtlpConfig {
         build(builder).map_err(OtlpError::build)
     }
 
-    /// Setup shared by every HTTP exporter: endpoint, timeout, headers, and a client whose
-    /// requests run on `runtime`.
+    /// Setup shared by every HTTP exporter: the signal's URL under the endpoint, timeout,
+    /// headers, and a client whose requests run on `runtime`.
     fn http<B: WithExportConfig + WithHttpConfig>(
         &self,
         builder: B,
         runtime: &ExportRuntime,
+        path: &str,
     ) -> Result<B, OtlpError> {
         // opentelemetry-otlp drops an invalid header without a word, so reject it here
         self.header_map()?;
@@ -178,9 +189,15 @@ impl OtlpConfig {
 
         Ok(builder
             .with_http_client(client)
-            .with_endpoint(&self.endpoint)
+            .with_endpoint(self.signal_url(path))
             .with_timeout(self.timeout)
             .with_headers(self.http_headers()))
+    }
+
+    // opentelemetry-otlp sends to a programmatic HTTP endpoint as given, with no signal path
+    fn signal_url(&self, path: &str) -> String {
+        let base = self.endpoint.strip_suffix('/').unwrap_or(&self.endpoint);
+        format!("{base}{path}")
     }
 
     // opentelemetry-otlp applies its export timeout only to a client it builds itself
@@ -319,6 +336,21 @@ mod tests {
                 "{protocol:?} {endpoint}: {:?}",
                 built.err()
             );
+        }
+    }
+
+    // @lat: [[tests#OTLP signal paths#Signal URL appends the signal path]]
+    #[cfg(feature = "otel")]
+    #[test]
+    fn signal_url_appends_signal_path() {
+        for (endpoint, path, want) in [
+            ("http://c:4318", "/v1/traces", "http://c:4318/v1/traces"),
+            ("http://c:4318/", "/v1/logs", "http://c:4318/v1/logs"),
+            ("https://c/otlp", "/v1/metrics", "https://c/otlp/v1/metrics"),
+        ] {
+            let cfg = exporter_config(OtlpProtocol::HttpProtobuf, endpoint);
+
+            assert_eq!(cfg.signal_url(path), want, "{endpoint} + {path}");
         }
     }
 

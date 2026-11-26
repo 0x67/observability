@@ -20,7 +20,7 @@ fn http_export_sends_configured_headers() {
         service_name: "http-export".to_owned(),
         level: "info".to_owned(),
         otlp: Some(OtlpConfig {
-            endpoint: format!("{base}/v1/traces"),
+            endpoint: base,
             protocol: OtlpProtocol::HttpProtobuf,
             headers: vec![("x-api-key".to_owned(), "k1".to_owned())],
             resource: Vec::new(),

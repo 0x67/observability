@@ -22,7 +22,7 @@ fn log_bridge_drops_exporter_thread_events() {
         service_name: "http-logs".to_owned(),
         level: "info".to_owned(),
         otlp: Some(OtlpConfig {
-            endpoint: format!("{base}/v1/logs"),
+            endpoint: base,
             protocol: OtlpProtocol::HttpProtobuf,
             headers: Vec::new(),
             resource: Vec::new(),
