@@ -18,6 +18,9 @@ on:
     - cron: "15 2 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   audit:
-    uses: 0x67/ci/.github/workflows/rust-audit.yml@main
+    uses: 0x67/ci/.github/workflows/rust-audit.yml@8f369fc7a2dc99282afb6d68df07349dda365a9b # main on 2026-11-26

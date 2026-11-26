@@ -5,18 +5,26 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   rust:
-    uses: 0x67/ci/.github/workflows/rust-ci.yml@main
+    uses: 0x67/ci/.github/workflows/rust-ci.yml@8f369fc7a2dc99282afb6d68df07349dda365a9b # main on 2026-11-26
 
   # guard feature-flag combos build + observability-core stays free of
   # opentelemetry/tracing-subscriber (heavy backends belong in leaf crate only).
   feature-matrix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # installs the channel pinned in rust-toolchain.toml
+      - name: install toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
         with:
           tool: cargo-hack
 
