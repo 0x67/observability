@@ -16,7 +16,19 @@ pub mod field;
 
 #[cfg(feature = "flush-tokio")]
 pub use flush::spawn_flusher;
-pub use gate::{METRICS_ON, metrics_enabled, refresh_thread_gate, set_metrics_enabled};
+pub use gate::{metrics_enabled, set_metrics_enabled};
 pub use handoff::{count_msg, drain_all, drain_count, merge_local, record_latency_ns, take_count};
 pub use sample::{SAMPLE_1_IN_8192, should_sample};
 pub use timer::{Timer, timer};
+
+/// Serializes unit tests that flip the gate or touch the shared slots; both are process-wide.
+#[cfg(test)]
+static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Takes [`TEST_STATE`], recovering it after a failed test poisoned it.
+#[cfg(test)]
+fn test_state() -> std::sync::MutexGuard<'static, ()> {
+    TEST_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}

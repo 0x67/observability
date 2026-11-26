@@ -7,25 +7,23 @@ backend wiring lives one crate up, in [`observability`](../observability).
 
 ## Why a separate crate
 
-The hot path never touches a shared atomic once a thread has primed its gate mirror. Everything
-sampled per-message lives in thread-local state and merges into shared registries only on a
+The hot path writes only thread-local state. Its one shared read is the gate flag, which is
+written rarely and so stays in each core's cache. Everything sampled per-message lives in
+thread-local state and merges into shared registries only on a
 periodic tick, so a flusher on another thread only ever sees data a worker already handed off,
 never a worker's live local state.
 
 ## Runtime gate
 
-A process-wide `AtomicBool` (`METRICS_ON`, starts OFF), mirrored per-thread into a
-`Cell<Option<bool>>`.
+One private process-wide `AtomicBool`, off at start. Every thread reads it directly, and a
+`set_metrics_enabled` call is visible on every thread without per-thread setup or a refresh call.
 
 ```rust
-pub static METRICS_ON: AtomicBool;
 pub fn set_metrics_enabled(on: bool);   // flip the process-wide gate (Relaxed; advisory)
-pub fn refresh_thread_gate();           // sync this thread's mirror from the flag
-pub fn metrics_enabled() -> bool;       // hot-path check: reads primed mirror, else the atomic
+pub fn metrics_enabled() -> bool;       // hot-path check: one Relaxed load
 ```
 
-Call `refresh_thread_gate` once per thread at startup, and again after any toggle a thread cares
-about. `observability::init_metrics` flips `METRICS_ON` on a successful recorder install, so a
+`observability::init_metrics` turns the gate on after a successful recorder install, so a
 binary rarely calls `set_metrics_enabled` directly.
 
 ## Latency, counts, sampling

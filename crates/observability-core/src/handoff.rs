@@ -129,7 +129,7 @@ pub fn drain_count() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gate::{refresh_thread_gate, set_metrics_enabled};
+    use crate::gate::set_metrics_enabled;
 
     /// take_count reads then resets this thread's counter; second read is zero.
     // @lat: [[tests#Per-thread message counting#take_count reads then resets]]
@@ -157,9 +157,9 @@ mod tests {
         const OVER_BOUND_NS: u64 = 70_000_000_000; // above HIST_HIGH_NS, must clamp not panic
         const MSG_COUNT: u64 = 7;
 
+        let _state = crate::test_state();
+        set_metrics_enabled(true);
         std::thread::spawn(|| {
-            set_metrics_enabled(true);
-            refresh_thread_gate();
             for &ns in &KNOWN {
                 record_latency_ns(ns);
             }

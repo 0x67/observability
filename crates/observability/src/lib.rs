@@ -25,9 +25,7 @@ pub use error::{MetricsError, OtlpError, PipelineError, Signal};
 pub use metrics::{MetricsGuard, init_metrics};
 // hot-path gate lives in the leaf crate; re-export so a binary drives it through `observability`.
 pub use observability_core;
-pub use observability_core::{
-    METRICS_ON, metrics_enabled, refresh_thread_gate, set_metrics_enabled,
-};
+pub use observability_core::{metrics_enabled, set_metrics_enabled};
 pub use otlp::{ClientCert, OtlpConfig, OtlpProtocol, OtlpTls, TlsRoots};
 pub use pipeline::{PipelineGuard, init_pipeline};
 

@@ -10,11 +10,11 @@ In `observability` they cover the metrics recorder guard, the OTLP config debug 
 
 ## Runtime gate
 
-The process-wide gate mirrors into a per-thread `Cell` so the hot path never re-reads the shared atomic once primed.
+The process-wide gate is one atomic that every thread reads directly, with no per-thread copy to refresh. Gate tests hold the crate's `TEST_STATE` lock, because the gate is shared by every test in the binary.
 
-### Gate defaults off then flips via refresh
+### Toggle reaches other threads without refresh
 
-Gate starts `false` on a fresh process; calling `set_metrics_enabled(true)` then `refresh_thread_gate` flips the calling thread's cached mirror to match.
+With the gate off, a spawned thread reads `metrics_enabled() == false` and waits. The main thread calls `set_metrics_enabled(true)`, and the spawned thread's next read returns `true` with no other call in between.
 
 ### Timer skips clock when gate off, captures when on
 

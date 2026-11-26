@@ -24,9 +24,9 @@ The subsystems are coupled at runtime in two places. One is the `OtlpConfig` val
 
 ## Hot-path memory model (observability-core)
 
-`observability-core` never touches a shared atomic on the hot path once a thread has primed its gate mirror. Everything sampled per-message lives in thread-local state, merged into shared registries only on a periodic tick.
+`observability-core` writes only thread-local state on the hot path; its one shared read is the gate flag. Everything sampled per-message lives in thread-local state, merged into shared registries only on a periodic tick.
 
-The runtime gate is a process-wide [[crates/observability-core/src/gate.rs#METRICS_ON]] `AtomicBool`, mirrored per-thread into a `Cell<Option<bool>>` refreshed via `refresh_thread_gate`. The hot-path check reads the thread-local mirror first and only falls back to the shared atomic before that mirror has ever been primed on the calling thread.
+The runtime gate is one private process-wide `AtomicBool`. [[crates/observability-core/src/gate.rs#set_metrics_enabled]] writes it and [[crates/observability-core/src/gate.rs#metrics_enabled]] reads it with a `Relaxed` load on every call, with no per-thread copy. The flag is written rarely and stays in each core's cache, so the load costs the same as a thread-local read. A write is visible on every thread without a refresh call.
 
 Latency samples land in a thread-local bounded `hdrhistogram::Histogram` (1ns..60s, 3 sig figs, `saturating_record` so a tail spike clamps into range instead of panicking) via [[crates/observability-core/src/handoff.rs#record_latency_ns]]. [[crates/observability-core/src/handoff.rs#merge_local]] hands that thread's histogram, plus its message count, into a registry-backed shared slot: one slot per thread that has ever merged. [[crates/observability-core/src/handoff.rs#drain_all]] folds every registered slot into one snapshot and clears each slot in place, so a flusher on another thread only ever sees data a worker thread has already merged, never a worker's live local state.
 
