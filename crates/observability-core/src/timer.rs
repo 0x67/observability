@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use crate::gate::metrics_enabled;
 
-/// RAII latency timer. Records elapsed seconds into `metric`'s histogram on drop.
+/// RAII latency timer. Records elapsed time into `metric`'s histogram on drop, in seconds,
+/// the base unit Prometheus and OpenTelemetry expect; nanoseconds stay inside the hdr path.
 /// `None` variant means gate was off at start: no clock read, no record on drop.
 pub struct Timer(Option<(Instant, &'static str)>);
 

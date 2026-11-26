@@ -21,6 +21,8 @@ tokio = { workspace = true, optional = true, features = ["rt", "time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "time", "macros", "test-util"] }
+# DebuggingRecorder for the flusher tests
+metrics-util = { version = "0.20.4", default-features = false, features = ["debugging"] }
 
 [features]
 # 100ms-tick flusher that drains histograms and emits gauges/counters.
