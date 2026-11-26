@@ -22,3 +22,7 @@ tokio = { workspace = true, optional = true }
 [features]
 # 100ms-tick flusher that drains histograms and emits gauges/counters.
 flush-tokio = ["dep:tokio"]
+
+[[bench]]
+name = "hot_path"
+harness = false
