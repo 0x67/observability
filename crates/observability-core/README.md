@@ -116,6 +116,38 @@ across processes is wrong math), and the flusher doesn't publish per-bucket coun
 a single-process service. This is the only feature and the only thing that pulls in `tokio`, and
 it enables only tokio's `rt` and `time` features.
 
+## Performance
+
+`cargo bench -p observability-core --bench hot_path --features flush-tokio` times each hot-path
+call and prints batch means in ns per call (1,000 calls per batch, or 1 for the drain and merge
+rows). The numbers below come from an Apple M4 Pro on macOS 27.2.1 with rustc 1.96.1 in the
+bench profile. Before is the code with two registries, a per-thread gate mirror, and 3
+significant figures; after is the slot registry, the single-atomic gate, and 2 significant
+figures. Each cell shows run 1 / run 2.
+
+| Row                      | Before p50        | Before p99            | After p50        | After p99         |
+| ------------------------ | ----------------- | --------------------- | ---------------- | ----------------- |
+| drain, 1 live slot       | 14,543 / 13,047   | 23,759 / 64,511       | 875 / 1,000      | 2,833 / 1,917     |
+| drain, 8 live slots      | 99,839 / 88,511   | 546,303 / 585,727     | 12,543 / 13,583  | 20,927 / 22,639   |
+| drain, 64 live slots     | 681,983 / 683,519 | 2,760,703 / 2,658,303 | 93,887 / 93,631  | 131,839 / 134,783 |
+| `metrics_enabled`        | 0.29 / 0.25       | 0.38 / 0.38           | 0.25 / 0.25      | 0.33 / 0.33       |
+| `record_latency_ns`      | 1.46 / 1.46       | 2.21 / 2.21           | 2.12 / 2.17      | 2.71 / 2.71       |
+| `count_msg`              | 0.96 / 1.00       | 1.21 / 1.29           | 1.12 / 1.12      | 1.42 / 1.42       |
+| `should_sample`          | 0.79 / 0.75       | 1.00 / 1.04           | 0.75 / 0.75      | 0.96 / 0.96       |
+| `merge_local`, idle      | 1,125 / 959       | 2,959 / 2,583         | under 42 (1 tick) | 42 / 42          |
+| `merge_local`, 1 pending | 9,295 / 9,335     | 11,503 / 13,503       | 1,250 / 1,250    | 1,583 / 1,542     |
+
+The churn case runs 40 rounds of 50 short-lived threads that each record one sample and merge,
+with one drain per round. Before, resident memory grew by 438,352 and 438,128 KiB, and the last
+drain walked all 2,000 slots in 27 and 31 ms. After, it grew by 128 and 112 KiB, and the last
+drain took 75 and 90 us.
+
+Each drain row refills every live slot with one sample before the timed drain. The before drain
+also allocated a 221 KB histogram per call. About 0.27 ns of the `record_latency_ns` rise came
+with the slot registry. The rest comes from the bench input at 2 significant figures: it records
+`1_000 + (i & 1023)`, so about 8 consecutive samples increment the same count. With the same values in
+scattered order, both precisions read 1.67 to 1.75 ns.
+
 ## Field keys
 
 `field::*` exposes OTel-standard dotted attribute keys (`http.request.method`, `rpc.service`,
