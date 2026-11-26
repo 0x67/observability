@@ -196,19 +196,14 @@ mod tests {
     fn otlp_metrics_with_invalid_endpoint_returns_exporter_error() {
         use std::time::Duration;
 
-        use crate::{
-            error::OtlpError,
-            otlp::{OtlpProtocol, OtlpTls},
-        };
+        use crate::{error::OtlpError, otlp::OtlpProtocol};
 
         let _lock = GATE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let otlp = OtlpConfig {
             endpoint: "http://exa mple:4317".to_owned(),
             protocol: OtlpProtocol::Grpc,
-            headers: Vec::new(),
-            resource: Vec::new(),
             timeout: Duration::from_secs(1),
-            tls: OtlpTls::default(),
+            ..Default::default()
         };
         let cfg = MetricsConfig {
             exporter: MetricsExporter::Otlp,

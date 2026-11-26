@@ -7,7 +7,7 @@ mod http_collector;
 use std::time::Duration;
 
 use observability::{
-    OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
+    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
 };
 
 // @lat: [[tests#OTLP headers#HTTP export sends configured headers]]
@@ -22,10 +22,9 @@ fn http_export_sends_configured_headers() {
         otlp: Some(OtlpConfig {
             endpoint: base,
             protocol: OtlpProtocol::HttpProtobuf,
-            headers: vec![("x-api-key".to_owned(), "k1".to_owned())],
-            resource: Vec::new(),
+            headers: [("x-api-key".to_owned(), "k1".to_owned())].into(),
             timeout: Duration::from_secs(5),
-            tls: OtlpTls::default(),
+            ..Default::default()
         }),
         logging: None,
         tracing: Some(TracingConfig {

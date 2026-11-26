@@ -8,7 +8,7 @@ mod grpc_collector;
 use std::time::{Duration, Instant};
 
 use observability::{
-    MetricsConfig, MetricsExporter, ObsConfig, OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig,
+    MetricsConfig, MetricsExporter, ObsConfig, OtlpConfig, OtlpProtocol, PipelineConfig,
     TraceExporter, TracingConfig, init,
 };
 
@@ -25,10 +25,8 @@ fn obs_guard_drop_inside_current_thread_runtime_delivers_final_batch() {
             otlp: Some(OtlpConfig {
                 endpoint,
                 protocol: OtlpProtocol::Grpc,
-                headers: Vec::new(),
-                resource: Vec::new(),
                 timeout: Duration::from_secs(5),
-                tls: OtlpTls::default(),
+                ..Default::default()
             }),
             logging: None,
             tracing: Some(TracingConfig {

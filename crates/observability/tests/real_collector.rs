@@ -14,7 +14,7 @@ use std::{fs, time::Duration};
 
 use observability::{
     LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, OtlpConfig,
-    OtlpProtocol, OtlpTls, PipelineConfig, Rotation, TraceExporter, TracingConfig, init_metrics,
+    OtlpProtocol, PipelineConfig, Rotation, TraceExporter, TracingConfig, init_metrics,
     init_pipeline,
 };
 
@@ -29,10 +29,8 @@ fn https_export_reaches_real_collector() {
     let otlp = |protocol, endpoint: String| OtlpConfig {
         endpoint,
         protocol,
-        headers: Vec::new(),
-        resource: Vec::new(),
         timeout: Duration::from_secs(10),
-        tls: OtlpTls::default(),
+        ..Default::default()
     };
 
     // export errors from the SDK land in this file at warn or error level

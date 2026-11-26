@@ -8,7 +8,7 @@ mod http_collector;
 use std::time::Duration;
 
 use observability::{
-    MetricsConfig, MetricsExporter, ObsConfig, OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig,
+    MetricsConfig, MetricsExporter, ObsConfig, OtlpConfig, OtlpProtocol, PipelineConfig,
     TraceExporter, TracingConfig, init,
 };
 
@@ -25,10 +25,8 @@ fn obs_guard_drop_inside_async_context_delivers_over_http() {
             otlp: Some(OtlpConfig {
                 endpoint: base,
                 protocol: OtlpProtocol::HttpProtobuf,
-                headers: Vec::new(),
-                resource: Vec::new(),
                 timeout: Duration::from_secs(5),
-                tls: OtlpTls::default(),
+                ..Default::default()
             }),
             logging: None,
             tracing: Some(TracingConfig {
