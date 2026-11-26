@@ -1,10 +1,12 @@
 //! TLS settings for `https://` OTLP endpoints, and the checked material both transports
 //! build their TLS config from.
 
+#[cfg(feature = "tls")]
+use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(feature = "tls")]
-use opentelemetry_otlp::tonic_types::transport::ClientTlsConfig;
+use opentelemetry_otlp::tonic_types::transport::{Certificate, ClientTlsConfig, Identity};
 
 #[cfg(feature = "tls")]
 use crate::error::OtlpError;
@@ -47,6 +49,23 @@ pub struct ClientCert {
 #[cfg(feature = "tls")]
 pub(crate) struct TlsMaterial {
     roots: TlsRoots,
+    ca_pem: Option<Vec<u8>>,
+    client: Option<ClientPem>,
+}
+
+/// A client certificate chain and its key, as read from disk.
+#[cfg(feature = "tls")]
+struct ClientPem {
+    chain: Vec<u8>,
+    key: Vec<u8>,
+}
+
+#[cfg(feature = "tls")]
+impl ClientPem {
+    // reqwest's rustls identity takes one buffer holding the key and the chain
+    fn reqwest_identity(&self) -> reqwest::Result<reqwest::Identity> {
+        reqwest::Identity::from_pem(&[self.key.as_slice(), self.chain.as_slice()].concat())
+    }
 }
 
 #[cfg(feature = "tls")]
@@ -60,31 +79,100 @@ impl TlsMaterial {
             }
             TlsRoots::CaFileOnly => {}
         }
-        Ok(Self { roots: tls.roots })
+
+        let ca_pem = tls.ca_file.as_deref().map(read_certificates).transpose()?;
+        let client = tls.client_cert.as_ref().map(read_client_pem).transpose()?;
+        Ok(Self {
+            roots: tls.roots,
+            ca_pem,
+            client,
+        })
     }
 
     pub(crate) fn tonic_config(&self) -> ClientTlsConfig {
-        match self.roots {
+        let config = match self.roots {
             TlsRoots::Native => ClientTlsConfig::new().with_native_roots(),
             #[cfg(feature = "tls-webpki-roots")]
             TlsRoots::Webpki => ClientTlsConfig::new().with_webpki_roots(),
             _ => ClientTlsConfig::new(),
+        };
+        let config = match &self.ca_pem {
+            Some(pem) => config.ca_certificate(Certificate::from_pem(pem)),
+            None => config,
+        };
+        match &self.client {
+            Some(client) => config.identity(Identity::from_pem(&client.chain, &client.key)),
+            None => config,
         }
     }
 
     pub(crate) fn apply_to_reqwest(
         &self,
         builder: reqwest::ClientBuilder,
-    ) -> reqwest::ClientBuilder {
+    ) -> Result<reqwest::ClientBuilder, OtlpError> {
         // start from no roots, then add exactly the ones configured
         let builder = builder.use_rustls_tls().tls_built_in_root_certs(false);
-        match self.roots {
+        let mut builder = match self.roots {
             TlsRoots::Native => builder.tls_built_in_native_certs(true),
             #[cfg(feature = "tls-webpki-roots")]
             TlsRoots::Webpki => builder.tls_built_in_webpki_certs(true),
             _ => builder,
+        };
+
+        // both PEM inputs parsed in `load`, so these errors are not expected here
+        if let Some(pem) = &self.ca_pem {
+            for cert in reqwest::Certificate::from_pem_bundle(pem).map_err(OtlpError::build)? {
+                builder = builder.add_root_certificate(cert);
+            }
         }
+        if let Some(client) = &self.client {
+            builder = builder.identity(client.reqwest_identity().map_err(OtlpError::build)?);
+        }
+        Ok(builder)
     }
+}
+
+/// Read a PEM file and check it holds at least one certificate, so a bad CA or chain
+/// fails at init with its path on either transport.
+#[cfg(feature = "tls")]
+fn read_certificates(path: &Path) -> Result<Vec<u8>, OtlpError> {
+    let pem = read_tls_file(path)?;
+    let invalid = |source| OtlpError::InvalidPem {
+        path: path.to_path_buf(),
+        source,
+    };
+
+    match reqwest::Certificate::from_pem_bundle(&pem) {
+        Ok(certs) if !certs.is_empty() => Ok(pem),
+        Ok(_) => Err(invalid("no PEM certificate found".into())),
+        Err(e) => Err(invalid(Box::new(e))),
+    }
+}
+
+/// Read the chain and the key, and check that together they parse as an identity.
+#[cfg(feature = "tls")]
+fn read_client_pem(cert: &ClientCert) -> Result<ClientPem, OtlpError> {
+    let client = ClientPem {
+        chain: read_certificates(&cert.cert_file)?,
+        key: read_tls_file(&cert.key_file)?,
+    };
+
+    // the chain already parsed, so a failure here is the key
+    client
+        .reqwest_identity()
+        .map_err(|e| OtlpError::InvalidPem {
+            path: cert.key_file.clone(),
+            source: Box::new(e),
+        })?;
+    Ok(client)
+}
+
+#[cfg(feature = "tls")]
+fn read_tls_file(path: &Path) -> Result<Vec<u8>, OtlpError> {
+    std::fs::read(path).map_err(|source| OtlpError::TlsFile {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 /// tonic fails its build on an empty OS store but reqwest only fails at the first
@@ -110,8 +198,104 @@ fn require_webpki_feature() -> Result<(), OtlpError> {
 
 #[cfg(all(test, feature = "tls"))]
 mod tests {
-    use super::{OtlpTls, TlsMaterial, TlsRoots};
+    use std::{fs, path::PathBuf};
+
+    use super::{ClientCert, OtlpTls, TlsMaterial, TlsRoots};
     use crate::error::OtlpError;
+
+    /// A temp dir for the PEM files one test writes, removed on drop.
+    struct PemDir(PathBuf);
+
+    impl PemDir {
+        fn new(test: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("obs-tls-{test}-{}", std::process::id()));
+            fs::create_dir_all(&dir).expect("create the PEM dir");
+            Self(dir)
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+
+        fn write(&self, name: &str, contents: &str) -> PathBuf {
+            let path = self.path(name);
+            fs::write(&path, contents).expect("write a PEM file");
+            path
+        }
+    }
+
+    impl Drop for PemDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    // a self-signed `localhost` certificate and its key, both PEM
+    fn self_signed() -> (String, String) {
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()])
+            .expect("generate a certificate");
+        (certified.cert.pem(), certified.signing_key.serialize_pem())
+    }
+
+    fn with_files(ca_file: PathBuf, client: Option<(PathBuf, PathBuf)>) -> OtlpTls {
+        OtlpTls {
+            roots: TlsRoots::CaFileOnly,
+            ca_file: Some(ca_file),
+            client_cert: client.map(|(cert_file, key_file)| ClientCert {
+                cert_file,
+                key_file,
+            }),
+        }
+    }
+
+    #[test]
+    fn unreadable_tls_file_returns_tls_file_with_path() {
+        let dir = PemDir::new("unreadable");
+        let (cert, key) = self_signed();
+        let cert_file = dir.write("cert.pem", &cert);
+        let key_file = dir.write("key.pem", &key);
+        let missing = dir.path("missing.pem");
+
+        for tls in [
+            with_files(missing.clone(), None),
+            with_files(cert_file.clone(), Some((missing.clone(), key_file.clone()))),
+            with_files(
+                cert_file.clone(),
+                Some((cert_file.clone(), missing.clone())),
+            ),
+        ] {
+            let loaded = TlsMaterial::load(&tls);
+
+            assert!(
+                matches!(&loaded, Err(OtlpError::TlsFile { path, .. }) if *path == missing),
+                "{tls:?}: {:?}",
+                loaded.err()
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_pem_returns_invalid_pem_with_path() {
+        let dir = PemDir::new("invalid");
+        let (cert, key) = self_signed();
+        let cert_file = dir.write("cert.pem", &cert);
+        let key_file = dir.write("key.pem", &key);
+        let bad = dir.write("bad.pem", "not a pem");
+
+        for tls in [
+            with_files(bad.clone(), None),
+            with_files(cert_file.clone(), Some((bad.clone(), key_file.clone()))),
+            with_files(cert_file.clone(), Some((cert_file.clone(), bad.clone()))),
+        ] {
+            let loaded = TlsMaterial::load(&tls);
+
+            assert!(
+                matches!(&loaded, Err(OtlpError::InvalidPem { path, .. }) if *path == bad),
+                "{tls:?}: {:?}",
+                loaded.err()
+            );
+        }
+    }
 
     #[cfg(not(feature = "tls-webpki-roots"))]
     #[test]

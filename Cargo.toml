@@ -45,6 +45,8 @@ http = "1.4.2"
 # test-only: the in-process gRPC mock collector
 tonic = "0.14.6"
 opentelemetry-proto = { version = "0.31.0", default-features = false }
+# test-only: certificates generated at test time, so no key or expiring PEM is committed
+rcgen = "0.14.10"
 opentelemetry-appender-tracing = "0.31"
 # backend: metrics exporters
 metrics-exporter-prometheus = "0.17"

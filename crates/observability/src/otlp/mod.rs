@@ -187,7 +187,7 @@ impl OtlpConfig {
         let builder = reqwest::Client::builder().timeout(self.timeout);
         #[cfg(feature = "tls")]
         let builder = match self.tls_material()? {
-            Some(tls) => tls.apply_to_reqwest(builder),
+            Some(tls) => tls.apply_to_reqwest(builder)?,
             None => builder,
         };
         #[cfg(not(feature = "tls"))]
