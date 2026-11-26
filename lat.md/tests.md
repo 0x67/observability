@@ -4,7 +4,9 @@ lat:
 ---
 # Tests
 
-Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`, plus the metrics recorder guard, the OTLP config debug output, and the OTLP layer filters in `observability`.
+Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`.
+
+In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, and the init contract.
 
 ## Runtime gate
 
@@ -89,3 +91,35 @@ The exporter threads are `observability-otlp`, `OpenTelemetry.Traces.BatchProces
 ### Bunyan storage layer hint follows most verbose bunyan sink
 
 Sinks bunyan `info`, bunyan `debug`, and json `trace` give the bunyan storage layer a max level hint of `DEBUG`: the json sink's `trace` does not count.
+
+## Init contract
+
+Config the build cannot honor returns a typed error before any subscriber or recorder is installed; each case runs in the feature set that makes it reachable.
+
+### Tracing without otlp returns missing otlp traces
+
+`tracing: Some` with `otlp: None` returns `PipelineError::MissingOtlp(Signal::Traces)` and leaves no global subscriber set.
+
+### OTLP log sink without otlp returns missing otlp logs
+
+An OTLP log sink with `otlp: None` returns `PipelineError::MissingOtlp(Signal::Logs)` and leaves no global subscriber set.
+
+### Tracing without otel feature returns feature disabled
+
+Without the `otel` feature, `tracing: Some` returns `PipelineError::FeatureDisabled { feature: "otel" }` and leaves no global subscriber set.
+
+### OTLP log sink without otel-logs returns feature disabled
+
+Without the `otel-logs` feature, an OTLP log sink returns `PipelineError::FeatureDisabled { feature: "otel-logs" }` and leaves no global subscriber set.
+
+### Bunyan sink without feature returns feature disabled
+
+Without the `bunyan` feature, a bunyan stdout sink returns `PipelineError::FeatureDisabled { feature: "bunyan" }` instead of falling back to json, and leaves no global subscriber set.
+
+### Invalid endpoint returns exporter error
+
+Tracing over HTTP to `http://exa mple:4318` returns `PipelineError::Exporter` with `Signal::Traces` and an `OtlpError::Build` source, and leaves no global subscriber set.
+
+### OTLP metrics with invalid endpoint returns exporter error
+
+`init_metrics` with the OTLP exporter over gRPC to `http://exa mple:4317` returns `MetricsError::Exporter(OtlpError::Build(_))` and leaves the metrics gate off.

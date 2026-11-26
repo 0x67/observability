@@ -140,10 +140,10 @@ fn install_otlp(
     let otlp = otlp.ok_or_else(|| {
         MetricsError::Install("otlp exporter requested but no OtlpConfig was provided".into())
     })?;
-    let runtime = ExportRuntime::shared().map_err(|e| MetricsError::Install(Box::new(e)))?;
+    let runtime = ExportRuntime::shared().map_err(MetricsError::Exporter)?;
     let exporter = otlp
         .metric_exporter(&runtime)
-        .map_err(|e| MetricsError::Install(Box::new(e)))?;
+        .map_err(MetricsError::Exporter)?;
     let provider = SdkMeterProvider::builder()
         .with_periodic_exporter(exporter)
         .with_resource(otlp.otel_resource(service_name))
@@ -167,17 +167,53 @@ fn install_otlp(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, PoisonError};
+
     use super::*;
+
+    // every test here reads or flips the process-wide metrics gate
+    static GATE_LOCK: Mutex<()> = Mutex::new(());
 
     // @lat: [[tests#Metrics recorder guard drop behavior#Drop flips the gate off]]
     #[test]
     fn drop_flips_gate_off() {
+        let _lock = GATE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         // `OtelMeterProvider` is `()` without `metrics-otel`; keep the feature-agnostic
         // `Default::default()` and silence the unit-arg lint that only fires in that build.
         #[allow(clippy::unit_arg)]
         let guard = MetricsGuard::new(Default::default());
         assert!(observability_core::metrics_enabled());
         drop(guard);
+        assert!(!observability_core::metrics_enabled());
+    }
+
+    // @lat: [[tests#Init contract#OTLP metrics with invalid endpoint returns exporter error]]
+    #[cfg(feature = "metrics-otel")]
+    #[test]
+    fn otlp_metrics_with_invalid_endpoint_returns_exporter_error() {
+        use std::time::Duration;
+
+        use crate::{error::OtlpError, otlp::OtlpProtocol};
+
+        let _lock = GATE_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let otlp = OtlpConfig {
+            endpoint: "http://exa mple:4317".to_owned(),
+            protocol: OtlpProtocol::Grpc,
+            headers: Vec::new(),
+            resource: Vec::new(),
+            timeout: Duration::from_secs(1),
+        };
+        let cfg = MetricsConfig {
+            exporter: MetricsExporter::Otlp,
+        };
+
+        let result = init_metrics(cfg, Some(&otlp), "metrics-test");
+
+        assert!(
+            matches!(result, Err(MetricsError::Exporter(OtlpError::Build(_)))),
+            "{:?}",
+            result.err()
+        );
         assert!(!observability_core::metrics_enabled());
     }
 }
