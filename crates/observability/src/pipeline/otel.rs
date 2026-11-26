@@ -10,17 +10,18 @@ use tracing_subscriber::Layer;
 
 use super::{BoxedLayer, filter::otlp_filter};
 use crate::{
-    error::OtlpError,
+    config::{LogSink, LogSinkKind, PipelineConfig},
+    error::{OtlpError, PipelineError, Signal},
     otlp::{ExportRuntime, OtlpConfig},
 };
 
 /// The OTel providers a pipeline built, plus the export runtime their exporters run on.
 pub(super) struct OtelProviders {
-    pub(super) tracer: Option<SdkTracerProvider>,
+    tracer: Option<SdkTracerProvider>,
     #[cfg(feature = "otel-logs")]
-    pub(super) logger: Option<SdkLoggerProvider>,
+    logger: Option<SdkLoggerProvider>,
     // declared last so the runtime outlives the providers' final flush
-    pub(super) _runtime: Arc<ExportRuntime>,
+    _runtime: Arc<ExportRuntime>,
 }
 
 impl OtelProviders {
@@ -35,8 +36,81 @@ impl OtelProviders {
     }
 }
 
+/// Push the OTel span layer and one OTLP log bridge per OTLP log sink onto `layers`, and
+/// return the providers behind them. `None` when the config asks for no OTLP signal.
+pub(super) fn otel_layers(
+    cfg: &PipelineConfig,
+    sinks: &[LogSink],
+    layers: &mut Vec<BoxedLayer>,
+) -> Result<Option<OtelProviders>, PipelineError> {
+    let log_levels: Vec<&str> = sinks
+        .iter()
+        .filter(|sink| matches!(sink.kind, LogSinkKind::Otlp))
+        .map(|sink| sink.level.as_deref().unwrap_or(&cfg.level))
+        .collect();
+    let first = match (&cfg.tracing, log_levels.is_empty()) {
+        (Some(_), _) => Signal::Traces,
+        (None, false) => Signal::Logs,
+        (None, true) => return Ok(None),
+    };
+    #[cfg(not(feature = "otel-logs"))]
+    if !log_levels.is_empty() {
+        return Err(PipelineError::FeatureDisabled {
+            feature: "otel-logs",
+        });
+    }
+
+    let otlp = cfg.otlp.as_ref().ok_or(PipelineError::MissingOtlp(first))?;
+    let runtime = ExportRuntime::shared().map_err(|source| PipelineError::Exporter {
+        signal: first,
+        source,
+    })?;
+
+    let tracer = match cfg.tracing {
+        Some(_) => {
+            let provider =
+                build_tracer_provider(otlp, &cfg.service_name, &runtime).map_err(|source| {
+                    PipelineError::Exporter {
+                        signal: Signal::Traces,
+                        source,
+                    }
+                })?;
+            layers.push(trace_layer(&provider, &cfg.level));
+            Some(provider)
+        }
+        None => None,
+    };
+
+    // one provider serves every OTLP log sink; each sink keeps its own level
+    #[cfg(feature = "otel-logs")]
+    let logger = if log_levels.is_empty() {
+        None
+    } else {
+        let provider =
+            build_logger_provider(otlp, &cfg.service_name, &runtime).map_err(|source| {
+                PipelineError::Exporter {
+                    signal: Signal::Logs,
+                    source,
+                }
+            })?;
+        layers.extend(
+            log_levels
+                .iter()
+                .map(|level| log_bridge_layer(&provider, level)),
+        );
+        Some(provider)
+    };
+
+    Ok(Some(OtelProviders {
+        tracer,
+        #[cfg(feature = "otel-logs")]
+        logger,
+        _runtime: runtime,
+    }))
+}
+
 /// The OTel span layer, filtered by `level` and with exporter threads dropped.
-pub(super) fn trace_layer(provider: &SdkTracerProvider, level: &str) -> BoxedLayer {
+fn trace_layer(provider: &SdkTracerProvider, level: &str) -> BoxedLayer {
     let tracer = provider.tracer("observability");
     tracing_opentelemetry::layer()
         .with_tracer(tracer)
@@ -46,13 +120,13 @@ pub(super) fn trace_layer(provider: &SdkTracerProvider, level: &str) -> BoxedLay
 
 /// The OTLP log bridge, filtered by `level` and with exporter threads dropped.
 #[cfg(feature = "otel-logs")]
-pub(super) fn log_bridge_layer(provider: &SdkLoggerProvider, level: &str) -> BoxedLayer {
+fn log_bridge_layer(provider: &SdkLoggerProvider, level: &str) -> BoxedLayer {
     OpenTelemetryTracingBridge::new(provider)
         .with_filter(otlp_filter(level))
         .boxed()
 }
 
-pub(super) fn build_tracer_provider(
+fn build_tracer_provider(
     otlp: &OtlpConfig,
     service: &str,
     runtime: &ExportRuntime,
@@ -65,7 +139,7 @@ pub(super) fn build_tracer_provider(
 }
 
 #[cfg(feature = "otel-logs")]
-pub(super) fn build_logger_provider(
+fn build_logger_provider(
     otlp: &OtlpConfig,
     service: &str,
     runtime: &ExportRuntime,

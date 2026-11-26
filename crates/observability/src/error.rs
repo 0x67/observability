@@ -1,6 +1,6 @@
 //! Error types for pipeline init, metrics recorder install, and OTLP exporter setup.
 
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use thiserror::Error;
 
@@ -8,6 +8,32 @@ use thiserror::Error;
 pub enum PipelineError {
     #[error("global tracing subscriber already initialized")]
     AlreadyInit,
+    #[error("{0} export needs `otlp` set in PipelineConfig")]
+    MissingOtlp(Signal),
+    #[error("the configuration needs the `{feature}` cargo feature")]
+    FeatureDisabled { feature: &'static str },
+    #[error("cannot build the OTLP {signal} exporter")]
+    Exporter {
+        signal: Signal,
+        #[source]
+        source: OtlpError,
+    },
+}
+
+/// OTLP signal a pipeline error refers to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Signal {
+    Traces,
+    Logs,
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Traces => "traces",
+            Self::Logs => "logs",
+        })
+    }
 }
 
 #[derive(Debug, Error)]
@@ -18,6 +44,8 @@ pub enum MetricsError {
     // metrics.rs picks the concrete source at the install site
     #[error("failed to install metrics recorder")]
     Install(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("cannot build the OTLP metrics exporter")]
+    Exporter(#[source] OtlpError),
 }
 
 /// Why an OTLP exporter could not be set up. Upstream errors are boxed, so no

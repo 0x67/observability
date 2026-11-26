@@ -4,12 +4,13 @@ use tracing_subscriber::Layer;
 #[cfg(feature = "bunyan")]
 use tracing_subscriber::filter::LevelFilter;
 
-#[cfg(not(feature = "bunyan"))]
-use super::pre_init_notice;
 use super::{BoxedLayer, filter::env_filter};
 #[cfg(feature = "bunyan")]
 use crate::config::LogSink;
-use crate::config::{LogFormat, Rotation};
+use crate::{
+    config::{LogFormat, Rotation},
+    error::PipelineError,
+};
 
 pub(super) fn rolling_appender(
     dir: &std::path::Path,
@@ -27,11 +28,16 @@ pub(super) fn rolling_appender(
 
 // `service` feeds the bunyan formatter's app-name field; unused when that feature is off.
 #[cfg_attr(not(feature = "bunyan"), allow(unused_variables))]
-pub(super) fn log_layer<W>(format: &LogFormat, service: &str, writer: W, level: &str) -> BoxedLayer
+pub(super) fn log_layer<W>(
+    format: &LogFormat,
+    service: &str,
+    writer: W,
+    level: &str,
+) -> Result<BoxedLayer, PipelineError>
 where
     W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + Send + Sync + 'static,
 {
-    match format {
+    let layer = match format {
         LogFormat::Json => tracing_subscriber::fmt::layer()
             .json()
             .with_writer(writer)
@@ -42,26 +48,16 @@ where
             .with_writer(writer)
             .with_filter(env_filter(level))
             .boxed(),
+        #[cfg(feature = "bunyan")]
         LogFormat::Bunyan => {
-            #[cfg(feature = "bunyan")]
-            {
-                tracing_bunyan_formatter::BunyanFormattingLayer::new(service.to_string(), writer)
-                    .with_filter(env_filter(level))
-                    .boxed()
-            }
-            #[cfg(not(feature = "bunyan"))]
-            {
-                pre_init_notice(format_args!(
-                    "bunyan format needs `bunyan` feature, using json"
-                ));
-                tracing_subscriber::fmt::layer()
-                    .json()
-                    .with_writer(writer)
-                    .with_filter(env_filter(level))
-                    .boxed()
-            }
+            tracing_bunyan_formatter::BunyanFormattingLayer::new(service.to_string(), writer)
+                .with_filter(env_filter(level))
+                .boxed()
         }
-    }
+        #[cfg(not(feature = "bunyan"))]
+        LogFormat::Bunyan => return Err(PipelineError::FeatureDisabled { feature: "bunyan" }),
+    };
+    Ok(layer)
 }
 
 /// The span storage every bunyan sink reads, filtered like the most verbose bunyan sink so
