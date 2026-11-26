@@ -61,13 +61,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     };
 
-    // Hold the guard for the whole process. Drop flushes OTLP batches and file
-    // writers, then flips the metrics gate off.
+    // Hold the guard for the whole process. Drop shuts the metrics recorder down,
+    // then exports the final OTLP batches and flushes the file writers.
     let _guard = init(cfg)?;
     tracing::info!("observability up");
     Ok(())
 }
 ```
+
+A plain `fn main()` is enough. OTLP export runs on the crate's own `observability-otlp`
+runtime, which means the app does not need a tokio runtime for export, and an app that runs
+tokio does not share its executor with export. `init` returns `Err` for config the build cannot honor, such as
+tracing without `otlp` or an `https://` endpoint built without the `tls` feature.
 
 On a hot-path library that only records latency, depend on `observability-core` alone:
 
@@ -102,7 +107,13 @@ merge_local();
 
 `init` runs both. The pipeline comes up first so that a metrics failure is itself logged, and a
 metrics install failure downgrades to a `tracing::warn!` plus `metrics: None` instead of taking
-down logging or tracing. A pipeline failure is fatal and returned.
+down logging or tracing. A pipeline failure is fatal and returned, and that includes config the
+build cannot honor: a missing `otlp`, a missing cargo feature, an exporter that fails to build.
+
+Both subsystems export on one tokio runtime the crate owns, so neither depends on the app's
+runtime. `https://` endpoints use TLS through the default `tls` feature, with the OS store, bundled
+roots, the OS platform verifier, or a private CA, and optionally a client certificate. The
+[`observability` crate README](crates/observability#tls) has the details.
 
 `observability-core` keeps the hot path off shared atomics: the runtime gate is mirrored into a
 thread-local `Cell`, latency samples land in a thread-local bounded `hdrhistogram::Histogram`,
