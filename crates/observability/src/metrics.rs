@@ -8,22 +8,34 @@
 //! leading `::metrics::`; bare `metrics::` resolves here instead.
 
 use std::net::SocketAddr;
+#[cfg(feature = "metrics-otel")]
+use std::sync::Arc;
 
 #[cfg(feature = "metrics-otel")]
 use opentelemetry::metrics::MeterProvider as _;
 #[cfg(feature = "metrics-otel")]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
+#[cfg(feature = "metrics-otel")]
+use crate::otlp::ExportRuntime;
 use crate::{
     config::{MetricsConfig, MetricsExporter},
     error::MetricsError,
     otlp::OtlpConfig,
 };
 
-/// OTLP meter provider slot. `Option<SdkMeterProvider>` when the OTLP metrics backend
-/// is compiled in, unit otherwise, so [`MetricsGuard`] carries no per-feature field list.
+/// The OTLP meter provider and the export runtime its exporter runs on.
 #[cfg(feature = "metrics-otel")]
-type OtelMeterProvider = Option<SdkMeterProvider>;
+struct OtlpMeter {
+    provider: SdkMeterProvider,
+    // declared last so the runtime outlives the provider's shutdown
+    _runtime: Arc<ExportRuntime>,
+}
+
+/// OTLP meter slot. `Option<OtlpMeter>` when the OTLP metrics backend is compiled in,
+/// unit otherwise, so [`MetricsGuard`] carries no per-feature field list.
+#[cfg(feature = "metrics-otel")]
+type OtelMeterProvider = Option<OtlpMeter>;
 #[cfg(not(feature = "metrics-otel"))]
 type OtelMeterProvider = ();
 
@@ -34,7 +46,7 @@ type OtelMeterProvider = ();
 pub struct MetricsGuard {
     // read only by `shutdown_otel` under `metrics-otel`; unit type otherwise.
     #[allow(dead_code)]
-    otel_provider: OtelMeterProvider,
+    otel: OtelMeterProvider,
 }
 
 impl MetricsGuard {
@@ -44,15 +56,15 @@ impl MetricsGuard {
         not(any(feature = "metrics-prom", feature = "metrics-otel")),
         allow(dead_code)
     )]
-    fn new(otel_provider: OtelMeterProvider) -> Self {
+    fn new(otel: OtelMeterProvider) -> Self {
         observability_core::set_metrics_enabled(true);
-        Self { otel_provider }
+        Self { otel }
     }
 
     #[cfg(feature = "metrics-otel")]
     fn shutdown_otel(&self) {
-        if let Some(provider) = &self.otel_provider {
-            let _ = provider.shutdown();
+        if let Some(otel) = &self.otel {
+            let _ = otel.provider.shutdown();
         }
     }
 
@@ -128,8 +140,9 @@ fn install_otlp(
     let otlp = otlp.ok_or_else(|| {
         MetricsError::Install("otlp exporter requested but no OtlpConfig was provided".into())
     })?;
+    let runtime = ExportRuntime::shared().map_err(|e| MetricsError::Install(Box::new(e)))?;
     let exporter = otlp
-        .metric_exporter()
+        .metric_exporter(&runtime)
         .map_err(|e| MetricsError::Install(Box::new(e)))?;
     let provider = SdkMeterProvider::builder()
         .with_periodic_exporter(exporter)
@@ -138,7 +151,10 @@ fn install_otlp(
     let recorder =
         metrics_exporter_otel::OpenTelemetryRecorder::new(provider.meter("observability"));
     ::metrics::set_global_recorder(recorder).map_err(|e| MetricsError::Install(Box::new(e)))?;
-    Ok(MetricsGuard::new(Some(provider)))
+    Ok(MetricsGuard::new(Some(OtlpMeter {
+        provider,
+        _runtime: runtime,
+    })))
 }
 
 #[cfg(not(feature = "metrics-otel"))]

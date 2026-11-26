@@ -34,6 +34,10 @@ Its `Debug` output prints each header name with `[REDACTED]` in place of the val
 
 `pipeline/otel.rs` and `metrics.rs` each call its exporter builders directly: `span_exporter` for tracing, `metric_exporter` (under `metrics-otel`) for the metrics bridge, `log_exporter` (under `otel-logs`) for the log bridge layer, all off the same endpoint/timeout/headers pair. No `opentelemetry` type crosses into a public `observability` signature; the builders stay `pub(crate)` and otel-gated.
 
+[[crates/observability/src/otlp/runtime.rs#ExportRuntime]] is the one tokio runtime (multi-thread, 1 worker, threads named `observability-otlp`) that runs every exporter's I/O, so OTLP export works with or without an app runtime. gRPC exporters are built inside its context, so tonic spawns its channel worker there. HTTP exporters send through [[crates/observability/src/otlp/http_client.rs#RuntimeHttpClient]], an async reqwest client whose requests are spawned onto that runtime.
+
+`ExportRuntime::shared` hands out the live runtime through a `Weak` slot, so the pipeline and metrics guards share one export thread, and an init after every guard dropped starts a fresh one. Each guard holds its `Arc` behind its providers, so the runtime outlives their final flush. The last `Arc` to drop calls `shutdown_background`, which is safe inside an async context.
+
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.
 
 ## Feature model

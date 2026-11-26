@@ -15,10 +15,12 @@ use self::filter::env_filter;
 #[cfg(feature = "otel-logs")]
 use self::otel::build_logger_provider;
 #[cfg(feature = "otel")]
-use self::otel::build_tracer_provider;
+use self::otel::{OtelProviders, build_tracer_provider};
 use self::sinks::{log_layer, rolling_appender};
 #[cfg(feature = "bunyan")]
 use crate::config::LogFormat;
+#[cfg(feature = "otel")]
+use crate::otlp::ExportRuntime;
 use crate::{
     config::{LogSinkKind, PipelineConfig},
     error::PipelineError,
@@ -50,6 +52,9 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
         layers.push(tracing_bunyan_formatter::JsonStorageLayer.boxed());
     }
 
+    // every OTLP provider here runs on one export runtime; `shared` hands back the live one
+    #[cfg(feature = "otel")]
+    let mut export_runtime = None;
     #[cfg(feature = "otel-logs")]
     let mut logger_provider = None;
 
@@ -75,14 +80,18 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
                 LogSinkKind::Otlp => {
                     #[cfg(feature = "otel-logs")]
                     match cfg.otlp.as_ref() {
-                        Some(otlp) => match build_logger_provider(otlp, &cfg.service_name) {
-                            Ok(provider) => {
+                        Some(otlp) => match ExportRuntime::shared().and_then(|runtime| {
+                            build_logger_provider(otlp, &cfg.service_name, &runtime)
+                                .map(|provider| (provider, runtime))
+                        }) {
+                            Ok((provider, runtime)) => {
                                 let bridge =
                                     opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
                                         &provider,
                                     );
                                 layers.push(bridge.with_filter(env_filter(level)).boxed());
                                 logger_provider = Some(provider);
+                                export_runtime = Some(runtime);
                             }
                             Err(e) => pre_init_notice(format_args!(
                                 "otlp log exporter build failed, log sink skipped: {e}"
@@ -106,12 +115,16 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
     let mut tracer_provider = None;
     #[cfg(feature = "otel")]
     if let (Some(_tracing), Some(otlp)) = (&cfg.tracing, &cfg.otlp) {
-        match build_tracer_provider(otlp, &cfg.service_name) {
-            Ok(provider) => {
+        match ExportRuntime::shared().and_then(|runtime| {
+            build_tracer_provider(otlp, &cfg.service_name, &runtime)
+                .map(|provider| (provider, runtime))
+        }) {
+            Ok((provider, runtime)) => {
                 use opentelemetry::trace::TracerProvider as _;
                 let tracer = provider.tracer("observability");
                 layers.push(tracing_opentelemetry::layer().with_tracer(tracer).boxed());
                 tracer_provider = Some(provider);
+                export_runtime = Some(runtime);
             }
             Err(e) => pre_init_notice(format_args!(
                 "otlp trace exporter build failed, tracing disabled: {e}"
@@ -127,9 +140,12 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
     Ok(PipelineGuard {
         workers,
         #[cfg(feature = "otel")]
-        tracer_provider,
-        #[cfg(feature = "otel-logs")]
-        logger_provider,
+        otel: export_runtime.map(|runtime| OtelProviders {
+            tracer: tracer_provider,
+            #[cfg(feature = "otel-logs")]
+            logger: logger_provider,
+            _runtime: runtime,
+        }),
     })
 }
 
