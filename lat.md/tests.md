@@ -160,6 +160,10 @@ Export over TLS to the mock collectors, which serve certificates from a PKI that
 
 With `TlsRoots::CaFileOnly`, the test CA as `ca_file`, and the test client certificate, traces over gRPC and metrics over HTTP reach TLS mocks that require a client certificate from the test CA.
 
+### Platform verifier with extra root exports on both transports
+
+With `TlsRoots::Platform`, the test CA as `ca_file` (extra roots for the OS verifier), and the test client certificate, traces over gRPC and metrics over HTTP reach the TLS mocks.
+
 ### Export without client cert is rejected
 
 The same mocks receive nothing from a config without `client_cert`, on either transport, and dropping both guards still returns.

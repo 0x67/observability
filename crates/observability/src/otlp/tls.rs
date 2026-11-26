@@ -4,9 +4,19 @@
 #[cfg(feature = "tls")]
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(feature = "tls-platform-verifier")]
+use std::sync::Arc;
 
 #[cfg(feature = "tls")]
 use opentelemetry_otlp::tonic_types::transport::{Certificate, ClientTlsConfig, Identity};
+#[cfg(feature = "tls-platform-verifier")]
+use rustls::{
+    ClientConfig,
+    crypto::CryptoProvider,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+};
+#[cfg(feature = "tls-platform-verifier")]
+use rustls_platform_verifier::Verifier;
 
 #[cfg(feature = "tls")]
 use crate::error::OtlpError;
@@ -32,6 +42,12 @@ pub enum TlsRoots {
     /// Mozilla roots compiled into the binary, for images without an OS CA bundle. Needs
     /// the `tls-webpki-roots` feature.
     Webpki,
+    /// The OS verifier (Security.framework, the Windows certificate APIs, Android's trust
+    /// manager, or webpki over the OS store elsewhere), which follows corporate CAs and
+    /// revocation; [`OtlpTls::ca_file`] adds extra roots except on Android. For desktop and
+    /// mobile apps. Needs the `tls-platform-verifier` feature, and an Android app must call
+    /// `rustls_platform_verifier::android::init_with_env` first.
+    Platform,
     /// Only the certificates in [`OtlpTls::ca_file`].
     CaFileOnly,
 }
@@ -74,6 +90,7 @@ impl TlsMaterial {
         match tls.roots {
             TlsRoots::Native => require_native_roots()?,
             TlsRoots::Webpki => require_webpki_feature()?,
+            TlsRoots::Platform => require_platform_feature()?,
             TlsRoots::CaFileOnly if tls.ca_file.is_none() => {
                 return Err(OtlpError::NoTrustAnchors);
             }
@@ -110,6 +127,11 @@ impl TlsMaterial {
         &self,
         builder: reqwest::ClientBuilder,
     ) -> Result<reqwest::ClientBuilder, OtlpError> {
+        #[cfg(feature = "tls-platform-verifier")]
+        if self.uses_platform_verifier() {
+            return Ok(builder.use_preconfigured_tls(self.platform_rustls_config()?));
+        }
+
         // start from no roots, then add exactly the ones configured
         let builder = builder.use_rustls_tls().tls_built_in_root_certs(false);
         let mut builder = match self.roots {
@@ -183,6 +205,96 @@ fn require_native_roots() -> Result<(), OtlpError> {
         return Err(OtlpError::NoNativeRoots);
     }
     Ok(())
+}
+
+#[cfg(feature = "tls-platform-verifier")]
+impl TlsMaterial {
+    pub(crate) fn uses_platform_verifier(&self) -> bool {
+        self.roots == TlsRoots::Platform
+    }
+
+    /// The pieces for tonic's `Endpoint::tls_config_with_verifier`: a config that carries
+    /// only the client identity (the endpoint rejects any root or CA setting) and the OS
+    /// verifier.
+    pub(crate) fn platform_tonic(&self) -> Result<(ClientTlsConfig, Arc<Verifier>), OtlpError> {
+        let config = match &self.client {
+            Some(client) => {
+                ClientTlsConfig::new().identity(Identity::from_pem(&client.chain, &client.key))
+            }
+            None => ClientTlsConfig::new(),
+        };
+        Ok((config, self.platform_verifier(process_or_ring_provider())?))
+    }
+
+    /// rustls config for reqwest's `use_preconfigured_tls`.
+    fn platform_rustls_config(&self) -> Result<ClientConfig, OtlpError> {
+        let provider = process_or_ring_provider();
+        let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()
+            .map_err(platform_error)?
+            // rustls names every custom verifier hook `dangerous`; this one checks the full chain
+            .dangerous()
+            .with_custom_certificate_verifier(self.platform_verifier(provider)?);
+
+        match &self.client {
+            Some(client) => {
+                let key = PrivateKeyDer::from_pem_slice(&client.key).map_err(platform_error)?;
+                builder
+                    .with_client_auth_cert(pem_certificates(&client.chain)?, key)
+                    .map_err(platform_error)
+            }
+            None => Ok(builder.with_no_client_auth()),
+        }
+    }
+
+    /// The OS verifier, with `ca_file` certificates as extra roots where the platform
+    /// allows it.
+    fn platform_verifier(&self, provider: Arc<CryptoProvider>) -> Result<Arc<Verifier>, OtlpError> {
+        let verifier = match &self.ca_pem {
+            None => Verifier::new(provider),
+            #[cfg(not(target_os = "android"))]
+            Some(pem) => Verifier::new_with_extra_roots(pem_certificates(pem)?, provider),
+            #[cfg(target_os = "android")]
+            Some(_) => {
+                return Err(OtlpError::PlatformVerifier(
+                    "ca_file is not supported with TlsRoots::Platform on Android".into(),
+                ));
+            }
+        };
+        verifier.map(Arc::new).map_err(platform_error)
+    }
+}
+
+/// The process-wide rustls provider when the app installed one, ring otherwise, the same
+/// choice tonic and reqwest make.
+#[cfg(feature = "tls-platform-verifier")]
+fn process_or_ring_provider() -> Arc<CryptoProvider> {
+    CryptoProvider::get_default()
+        .cloned()
+        .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()))
+}
+
+#[cfg(feature = "tls-platform-verifier")]
+fn pem_certificates(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, OtlpError> {
+    CertificateDer::pem_slice_iter(pem)
+        .collect::<Result<_, _>>()
+        .map_err(platform_error)
+}
+
+#[cfg(feature = "tls-platform-verifier")]
+fn platform_error(source: impl std::error::Error + Send + Sync + 'static) -> OtlpError {
+    OtlpError::PlatformVerifier(Box::new(source))
+}
+
+#[cfg(feature = "tls")]
+fn require_platform_feature() -> Result<(), OtlpError> {
+    if cfg!(feature = "tls-platform-verifier") {
+        Ok(())
+    } else {
+        Err(OtlpError::FeatureDisabled {
+            feature: "tls-platform-verifier",
+        })
+    }
 }
 
 #[cfg(feature = "tls")]
@@ -311,6 +423,24 @@ mod tests {
             loaded,
             Err(OtlpError::FeatureDisabled {
                 feature: "tls-webpki-roots"
+            })
+        ));
+    }
+
+    #[cfg(not(feature = "tls-platform-verifier"))]
+    #[test]
+    fn platform_roots_without_feature_returns_feature_disabled() {
+        let tls = OtlpTls {
+            roots: TlsRoots::Platform,
+            ..OtlpTls::default()
+        };
+
+        let loaded = TlsMaterial::load(&tls);
+
+        assert!(matches!(
+            loaded,
+            Err(OtlpError::FeatureDisabled {
+                feature: "tls-platform-verifier"
             })
         ));
     }
