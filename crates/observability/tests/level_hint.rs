@@ -17,7 +17,7 @@ use tracing::level_filters::LevelFilter;
 fn tracing_on_keeps_global_max_level_and_drops_debug_spans() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start();
+    let (base, collector) = http_collector::start(None);
     let cfg = PipelineConfig {
         service_name: "level-hint".to_owned(),
         level: "info".to_owned(),

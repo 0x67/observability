@@ -3,22 +3,26 @@
 //! Include it with `#[path = "support/http_collector.rs"] mod http_collector;`.
 
 use std::{
-    io::{BufRead, BufReader, Write},
-    net::{TcpListener, TcpStream},
+    io::{BufRead, BufReader, Read, Write},
+    net::TcpListener,
     sync::{Arc, Mutex, PoisonError},
     thread,
 };
+
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 /// Handle to a running mock; it serves until the test process exits.
 pub struct HttpCollector {
     received: Arc<Mutex<Vec<u8>>>,
 }
 
-/// Start the mock and return its base URL (`http://127.0.0.1:<port>`) and a handle.
-pub fn start() -> (String, HttpCollector) {
+/// Start the mock and return its base URL and a handle. With `tls`, it serves HTTPS
+/// (`https://127.0.0.1:<port>`); without, plain HTTP (`http://127.0.0.1:<port>`).
+pub fn start(tls: Option<Arc<ServerConfig>>) -> (String, HttpCollector) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind the mock collector");
+    let scheme = if tls.is_some() { "https" } else { "http" };
     let base = format!(
-        "http://{}",
+        "{scheme}://{}",
         listener.local_addr().expect("mock collector address")
     );
     let received = Arc::new(Mutex::new(Vec::new()));
@@ -27,7 +31,16 @@ pub fn start() -> (String, HttpCollector) {
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let sink = Arc::clone(&sink);
-            thread::spawn(move || serve(stream, &sink));
+            let tls = tls.clone();
+            thread::spawn(move || match tls {
+                None => serve(stream, &sink),
+                // a rejected handshake fails the first read, so that connection records nothing
+                Some(config) => {
+                    if let Ok(session) = ServerConnection::new(config) {
+                        serve(StreamOwned::new(session, stream), &sink);
+                    }
+                }
+            });
         }
     });
 
@@ -45,8 +58,7 @@ impl HttpCollector {
 
 // one keep-alive connection: record each request before answering 200, so an export that
 // returned has already been recorded
-fn serve(stream: TcpStream, sink: &Mutex<Vec<u8>>) {
-    let mut reply = stream.try_clone().expect("clone the mock stream");
+fn serve(stream: impl Read + Write, sink: &Mutex<Vec<u8>>) {
     let mut reader = BufReader::new(stream);
 
     while let Some(request) = read_request(&mut reader) {
@@ -55,7 +67,9 @@ fn serve(stream: TcpStream, sink: &Mutex<Vec<u8>>) {
             .extend_from_slice(&request);
         let ok =
             b"HTTP/1.1 200 OK\r\ncontent-type: application/x-protobuf\r\ncontent-length: 0\r\n\r\n";
-        if reply.write_all(ok).is_err() {
+        // a request is read in full before the reply, so nothing buffered is skipped
+        let reply = reader.get_mut();
+        if reply.write_all(ok).and_then(|()| reply.flush()).is_err() {
             return;
         }
     }

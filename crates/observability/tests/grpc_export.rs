@@ -16,7 +16,7 @@ use observability::{
 fn grpc_export_without_app_runtime_sends_headers_as_metadata() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (endpoint, collector) = grpc_collector::start();
+    let (endpoint, collector) = grpc_collector::start(None);
     assert!(tokio::runtime::Handle::try_current().is_err());
     let cfg = PipelineConfig {
         service_name: "grpc-export".to_owned(),
