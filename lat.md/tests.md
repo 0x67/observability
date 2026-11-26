@@ -4,7 +4,7 @@ lat:
 ---
 # Tests
 
-Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`, plus the metrics recorder guard and the OTLP config debug output in `observability`.
+Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`, plus the metrics recorder guard, the OTLP config debug output, and the OTLP layer filters in `observability`.
 
 ## Runtime gate
 
@@ -67,3 +67,25 @@ Constructing a `MetricsGuard` flips the `observability-core` gate on; dropping t
 ### Debug prints header names and hides values
 
 Formatting an `OtlpConfig` that has header `("x-api-key", "s3cr3t-value")` shows the header name paired with `[REDACTED]`, never the value, and still shows endpoint, protocol, resource, and timeout.
+
+## OTLP layer filters
+
+The OTel span layer, the OTLP log bridge, and the bunyan span storage each carry a filter, so the global max level stays at the configured level and exporter threads produce no OTLP telemetry.
+
+### Tracing on keeps global max level and drops debug spans
+
+With tracing on at `level = "info"` against the HTTP mock collector, `LevelFilter::current()` is `INFO`; after a `debug_span!("below")`, an `info_span!("kept")`, and the guard drop, the collector received `kept` and not `below`.
+
+### Log bridge drops exporter thread events
+
+With an OTLP log sink at `info`, a `warn!` with target `tonic::transport` from the test thread reaches the HTTP mock collector, and a `warn!` from a thread named `OpenTelemetry.Logs.BatchProcessor` does not.
+
+### Exporter thread filter drops only exporter thread events
+
+A capture layer behind `otlp_filter("info")` records a `tonic::transport` warning from the test thread and from a thread named `app-worker`, and nothing from the four exporter threads.
+
+The exporter threads are `observability-otlp`, `OpenTelemetry.Traces.BatchProcessor`, `OpenTelemetry.Logs.BatchProcessor`, and `OpenTelemetry.Metrics.PeriodicReader`.
+
+### Bunyan storage layer hint follows most verbose bunyan sink
+
+Sinks bunyan `info`, bunyan `debug`, and json `trace` give the bunyan storage layer a max level hint of `DEBUG`: the json sink's `trace` does not count.
