@@ -28,7 +28,18 @@ tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.32"
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "http-proto"] }
+# default features off: no reqwest-blocking-client, so HTTP export uses the crate's async client
+opentelemetry-otlp = { version = "0.31", default-features = false, features = [
+  "grpc-tonic",
+  "http-proto",
+  "trace",
+  "metrics",
+  "logs",
+  "internal-logs",
+] }
+opentelemetry-http = { version = "0.31.0", default-features = false, features = ["reqwest"] }
+reqwest = { version = "0.12.28", default-features = false }
+async-trait = "0.1.89"
 opentelemetry-appender-tracing = "0.31"
 # backend: metrics exporters
 metrics-exporter-prometheus = "0.17"
