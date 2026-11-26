@@ -23,6 +23,8 @@ use crate::error::OtlpError;
 
 /// TLS settings for `https://` OTLP endpoints. `http://` endpoints ignore them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct OtlpTls {
     /// Root certificates to trust.
     pub roots: TlsRoots,
@@ -35,6 +37,8 @@ pub struct OtlpTls {
 
 /// Root certificates an `https://` collector's certificate is checked against.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum TlsRoots {
     /// The OS certificate store.
     #[default]
@@ -54,6 +58,8 @@ pub enum TlsRoots {
 
 /// Client certificate and key for collectors that require mutual TLS.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ClientCert {
     /// PEM certificate chain, leaf first.
     pub cert_file: PathBuf,

@@ -1,5 +1,9 @@
 //! Plain-data pipeline config. No `opentelemetry` type in any field; `otlp.rs` is the
 //! only module allowed to know about the SDK.
+//!
+//! With the `serde` feature every config type implements `Deserialize`: snake_case names,
+//! unknown fields rejected, omitted fields taken from the type's `Default`, and each
+//! `Duration` as integer milliseconds in a field ending in `_ms`.
 
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -14,6 +18,8 @@ use crate::otlp::OtlpConfig;
 /// The default logs JSON to stdout at `info` for service `unknown_service`, with no OTLP
 /// and no tracing.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct PipelineConfig {
     pub service_name: String,
     pub level: String,
@@ -37,6 +43,8 @@ impl Default for PipelineConfig {
 
 /// Log fan-out across N sinks. The default is one stdout JSON sink.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct LoggingConfig {
     pub sinks: Vec<LogSink>,
 }
@@ -51,6 +59,8 @@ impl Default for LoggingConfig {
 
 /// One logging sink: destination, wire format, optional per-sink level override.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct LogSink {
     pub kind: LogSinkKind,
     pub format: LogFormat,
@@ -59,15 +69,22 @@ pub struct LogSink {
 
 /// Sink destination.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(rename_all = "snake_case", deny_unknown_fields)
+)]
 pub enum LogSinkKind {
     #[default]
     Stdout,
     RollingFile {
         dir: PathBuf,
         prefix: String,
+        #[cfg_attr(feature = "serde", serde(default))]
         rotation: Rotation,
         /// Most files with this prefix kept in `dir`, pruned when the sink opens and on
         /// each rotation; `None` keeps every file.
+        #[cfg_attr(feature = "serde", serde(default))]
         max_files: Option<NonZeroUsize>,
     },
     Otlp,
@@ -75,6 +92,8 @@ pub enum LogSinkKind {
 
 /// Log line wire format.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum LogFormat {
     #[default]
     Json,
@@ -84,6 +103,8 @@ pub enum LogFormat {
 
 /// Rolling-file rotation cadence.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum Rotation {
     Minutely,
     Hourly,
@@ -94,12 +115,16 @@ pub enum Rotation {
 
 /// Tracing subsystem config: which exporter backs the span pipeline.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct TracingConfig {
     pub exporter: TraceExporter,
 }
 
 /// Trace exporter choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum TraceExporter {
     #[default]
     Otlp,
@@ -107,6 +132,8 @@ pub enum TraceExporter {
 
 /// Metrics subsystem config: which recorder backs the `metrics` facade.
 #[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct MetricsConfig {
     pub exporter: MetricsExporter,
 }
@@ -114,6 +141,11 @@ pub struct MetricsConfig {
 /// Metrics exporter choice: Prometheus pull endpoint or OTLP push bridge. The default is
 /// Prometheus on `127.0.0.1:9000`.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(rename_all = "snake_case", deny_unknown_fields)
+)]
 pub enum MetricsExporter {
     Prometheus { bind: SocketAddr },
     Otlp,
@@ -124,6 +156,113 @@ impl Default for MetricsExporter {
         // loopback, so a default build does not serve metrics on every interface
         Self::Prometheus {
             bind: SocketAddr::from((Ipv4Addr::LOCALHOST, 9000)),
+        }
+    }
+}
+
+/// `Duration` fields in a config file are integer milliseconds.
+#[cfg(feature = "serde")]
+pub(crate) mod duration_ms {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer};
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        u64::deserialize(d).map(Duration::from_millis)
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod tests {
+    use std::{collections::BTreeMap, num::NonZeroUsize, path::Path, time::Duration};
+
+    use super::{LogFormat, LogSinkKind, Rotation};
+    use crate::{ClientCert, ObsConfig, OtlpProtocol, OtlpTls, TlsRoots};
+
+    fn parse(json: &str) -> Result<ObsConfig, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    // @lat: [[tests#Config files#Config file parses into expected values]]
+    #[test]
+    fn config_file_parses_into_expected_values() {
+        let cfg = parse(
+            r#"{"pipeline":{"service_name":"svc","otlp":{"endpoint":"http://c:4318","protocol":"grpc","timeout_ms":2500,"headers":{"x-key":"k"},"resource":{"env":"ci"}},"logging":{"sinks":[{"kind":"stdout"},{"kind":{"rolling_file":{"dir":"/tmp/x","prefix":"p","max_files":3}},"format":"pretty"}]}}}"#,
+        )
+        .expect("the document parses");
+
+        let pipeline = &cfg.pipeline;
+        assert_eq!(pipeline.service_name, "svc");
+        assert_eq!(pipeline.level, "info");
+        let otlp = pipeline.otlp.as_ref().expect("otlp is set");
+        assert_eq!(otlp.protocol, OtlpProtocol::Grpc);
+        assert_eq!(otlp.timeout, Duration::from_millis(2500));
+        let map = |key: &str, value: &str| BTreeMap::from([(key.to_owned(), value.to_owned())]);
+        assert_eq!(otlp.headers, map("x-key", "k"));
+        assert_eq!(otlp.resource, map("env", "ci"));
+        let sinks = &pipeline.logging.as_ref().expect("logging is set").sinks;
+        assert!(matches!(sinks[0].kind, LogSinkKind::Stdout), "{sinks:?}");
+        let LogSinkKind::RollingFile {
+            dir,
+            prefix,
+            rotation,
+            max_files,
+        } = &sinks[1].kind
+        else {
+            panic!("second sink is a rolling file: {sinks:?}");
+        };
+        assert_eq!(dir, Path::new("/tmp/x"));
+        assert_eq!(prefix, "p");
+        assert_eq!(*rotation, Rotation::Daily);
+        assert_eq!(max_files.map(NonZeroUsize::get), Some(3));
+        assert_eq!(sinks[1].format, LogFormat::Pretty);
+        assert!(cfg.metrics.is_none());
+    }
+
+    // @lat: [[tests#Config files#TLS settings parse from file]]
+    #[test]
+    fn tls_settings_parse_from_file() {
+        let cfg = parse(
+            r#"{"pipeline":{"otlp":{"tls":{"roots":"webpki","ca_file":"/etc/ca.pem","client_cert":{"cert_file":"c.pem","key_file":"k.pem"}}}}}"#,
+        )
+        .expect("the document parses");
+
+        let otlp = cfg.pipeline.otlp.expect("otlp is set");
+        let want = OtlpTls {
+            roots: TlsRoots::Webpki,
+            ca_file: Some("/etc/ca.pem".into()),
+            client_cert: Some(ClientCert {
+                cert_file: "c.pem".into(),
+                key_file: "k.pem".into(),
+            }),
+        };
+        assert_eq!(otlp.tls, want);
+
+        let no_key =
+            parse(r#"{"pipeline":{"otlp":{"tls":{"client_cert":{"cert_file":"c.pem"}}}}}"#);
+        let err = no_key.err().expect("a client_cert without key_file fails");
+        assert!(err.to_string().contains("`key_file`"), "{err}");
+    }
+
+    // @lat: [[tests#Config files#Unknown field is rejected]]
+    #[test]
+    fn unknown_field_is_rejected() {
+        for (json, field) in [
+            (r#"{"pipeline":{"servce_name":"x"}}"#, "servce_name"),
+            (
+                r#"{"pipeline":{"logging":{"sinks":[{"kind":{"rolling_file":{"dir":"/x","prefix":"p","max_file":3}}}]}}}"#,
+                "max_file",
+            ),
+        ] {
+            let err = parse(json)
+                .err()
+                .unwrap_or_else(|| panic!("{field} is rejected"));
+
+            assert!(
+                err.to_string()
+                    .contains(&format!("unknown field `{field}`")),
+                "{err}"
+            );
         }
     }
 }

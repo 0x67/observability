@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -137,6 +137,24 @@ The default config values build a working pipeline, so a caller sets only the fi
 `OtlpConfig { endpoint: <mock base URL>, ..Default::default() }` with `TracingConfig::default()` and no app runtime sends the span in a `POST /v1/traces` with `content-type: application/x-protobuf`.
 
 A gRPC default would send nothing the HTTP mock accepts.
+
+## Config files
+
+With the `serde` feature, the whole config reads from a file. These tests parse JSON; TOML and YAML use the same names.
+
+### Config file parses into expected values
+
+A JSON document with a gRPC `otlp` table (`timeout_ms` 2500, one header, one resource attribute) and a stdout plus a rolling-file sink parses into those values.
+
+Omitted fields come from each type's `Default`: level `info`, `Rotation::Daily`, and no metrics. The rolling sink keeps `max_files` 3 and `LogFormat::Pretty`.
+
+### TLS settings parse from file
+
+An `otlp.tls` table with `roots = "webpki"`, a `ca_file`, and a `client_cert` gives `TlsRoots::Webpki` and both paths. A `client_cert` without `key_file` fails and names the field.
+
+### Unknown field is rejected
+
+A misspelled `servce_name`, and a misspelled `max_file` inside a `rolling_file` sink, each fail with an error that names the unknown field.
 
 ## Metrics recorder guard drop behavior
 

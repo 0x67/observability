@@ -28,6 +28,8 @@ Every config type has a `Default` that builds a working pipeline with no tokio r
 
 [[crates/observability/src/config.rs#PipelineConfig]] defaults to stdout JSON logging at `info` for service `unknown_service`, the SDK's fallback name, with no OTLP and no tracing. [[crates/observability/src/lib.rs#ObsConfig]] adds no metrics recorder. `OtlpConfig` defaults to HTTP/protobuf at `http://localhost:4318` with a 10 s timeout, the OTLP defaults. `MetricsExporter` defaults to Prometheus on `127.0.0.1:9000`, loopback so a default build does not serve metrics on every interface. OTLP headers and resource attributes are `BTreeMap`s, one entry per key, iterated in key order.
 
+The `serde` feature derives `Deserialize` for every config type, TLS settings included, so a service reads its config from a TOML, YAML, or JSON file. Names are snake_case, an unknown field fails (struct variants of `LogSinkKind` and `MetricsExporter` too), omitted fields come from the type's `Default`, and a `Duration` is integer milliseconds in a field ending in `_ms`, such as `timeout_ms`. Enums use serde's external tagging: `kind = "stdout"`, or `kind = { rolling_file = { ... } }`. There is no `Serialize`, because it would write header values, usually credentials, back out.
+
 ## Hot-path memory model (observability-core)
 
 `observability-core` writes only thread-local state on the hot path; its one shared read is the gate flag. Everything sampled per-message lives in thread-local state, handed to one shared slot per thread only on a periodic tick or at thread exit.
@@ -70,7 +72,7 @@ TLS applies only to `https://` endpoints, so `http://localhost` stays plain text
 
 `otel` is the grouping feature. Per-signal features layer on top of it.
 
-`otel` pulls in `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp`/`tracing-opentelemetry`, plus `tokio` and `reqwest` for the export runtime, and gates every `#[cfg(feature = "otel")]` block. `tls` (default) adds rustls with ring for tonic and reqwest and the OS store check; `tls-webpki-roots` adds the bundled Mozilla roots; `tls-platform-verifier` adds `rustls-platform-verifier`. `otel-traces` is a plain alias for `otel`. `otel-logs` adds the OTLP log bridge (`opentelemetry-appender-tracing`). `metrics-prom` adds the Prometheus pull exporter. `metrics-otel` adds the OTLP metrics bridge and implies `otel`. `bunyan` adds the bunyan-format log sink.
+`otel` pulls in `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp`/`tracing-opentelemetry`, plus `tokio` and `reqwest` for the export runtime, and gates every `#[cfg(feature = "otel")]` block. `tls` (default) adds rustls with ring for tonic and reqwest and the OS store check; `tls-webpki-roots` adds the bundled Mozilla roots; `tls-platform-verifier` adds `rustls-platform-verifier`. `otel-traces` is a plain alias for `otel`. `otel-logs` adds the OTLP log bridge (`opentelemetry-appender-tracing`). `metrics-prom` adds the Prometheus pull exporter. `metrics-otel` adds the OTLP metrics bridge and implies `otel`. `bunyan` adds the bunyan-format log sink. `serde` adds `Deserialize` to the config types.
 
 No feature is named `tracing` or `metrics`; those names stay reserved for the extern facade crate deps themselves, so a feature flag never shadows `tracing::` or `metrics::` path resolution.
 

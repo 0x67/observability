@@ -40,6 +40,8 @@ use crate::redact::REDACTED;
 /// The default is HTTP/protobuf to `http://localhost:4318` with a 10 s timeout, the OTLP
 /// defaults. `Debug` prints header names with `[REDACTED]` in place of each value.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct OtlpConfig {
     /// Collector base URL. HTTP export appends `/v1/traces`, `/v1/logs`, or `/v1/metrics`
     /// after dropping one trailing `/`; gRPC uses it as given.
@@ -47,6 +49,10 @@ pub struct OtlpConfig {
     pub protocol: OtlpProtocol,
     pub headers: BTreeMap<String, String>,
     pub resource: BTreeMap<String, String>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "timeout_ms", with = "crate::config::duration_ms")
+    )]
     pub timeout: Duration,
     /// Used only for `https://` endpoints.
     pub tls: OtlpTls,
@@ -94,6 +100,8 @@ const METRICS_PATH: &str = "/v1/metrics";
 
 /// Wire transport for the OTLP exporters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum OtlpProtocol {
     Grpc,
     #[default]
