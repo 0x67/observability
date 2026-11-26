@@ -40,6 +40,7 @@ pub struct ObsConfig {
 
 /// Held for the process lifetime. Drop flushes the pipeline's OTel batches and file writers,
 /// then flips the metrics gate off.
+#[must_use = "dropping the guard stops the log writers and flushes the exporters; keep it alive for the process lifetime"]
 pub struct ObsGuard {
     pub pipeline: PipelineGuard,
     pub metrics: Option<MetricsGuard>,
