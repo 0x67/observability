@@ -78,7 +78,8 @@ bunyan = ["dep:tracing-bunyan-formatter"]
 
 [dev-dependencies]
 rcgen = { workspace = true }
-tonic = { workspace = true, features = ["transport", "router"] }
+rustls = { workspace = true }
+tonic = { workspace = true, features = ["transport", "router", "tls-ring"] }
 opentelemetry-proto = { workspace = true, features = [
   "gen-tonic",
   "trace",

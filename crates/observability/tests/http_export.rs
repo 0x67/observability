@@ -15,7 +15,7 @@ use observability::{
 fn http_export_sends_configured_headers() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start();
+    let (base, collector) = http_collector::start(None);
     let cfg = PipelineConfig {
         service_name: "http-export".to_owned(),
         level: "info".to_owned(),

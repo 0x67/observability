@@ -25,7 +25,7 @@ use opentelemetry_proto::tonic::collector::{
 use tonic::{
     Request, Response, Status,
     metadata::KeyAndValueRef,
-    transport::{Server, server::TcpIncoming},
+    transport::{Server, ServerTlsConfig, server::TcpIncoming},
 };
 
 /// Handle to a running mock; it serves until the test process exits.
@@ -33,9 +33,11 @@ pub struct GrpcCollector {
     received: Arc<Mutex<String>>,
 }
 
-/// Start the mock on its own runtime in a std thread and return its endpoint
-/// (`http://127.0.0.1:<port>`) and a handle. The calling thread gets no runtime.
-pub fn start() -> (String, GrpcCollector) {
+/// Start the mock on its own runtime in a std thread and return its endpoint and a handle.
+/// With `tls`, it serves gRPC over TLS (`https://127.0.0.1:<port>`); without, plain gRPC
+/// (`http://127.0.0.1:<port>`). The calling thread gets no runtime.
+pub fn start(tls: Option<ServerTlsConfig>) -> (String, GrpcCollector) {
+    let scheme = if tls.is_some() { "https" } else { "http" };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -47,14 +49,18 @@ pub fn start() -> (String, GrpcCollector) {
             .expect("bind the mock collector")
     };
     let endpoint = format!(
-        "http://{}",
+        "{scheme}://{}",
         incoming.local_addr().expect("mock collector address")
     );
     let received = Arc::new(Mutex::new(String::new()));
 
     let recorder = Recorder(Arc::clone(&received));
     thread::spawn(move || {
-        let server = Server::builder()
+        let mut server = Server::builder();
+        if let Some(tls) = tls {
+            server = server.tls_config(tls).expect("mock collector TLS config");
+        }
+        let server = server
             .add_service(TraceServiceServer::new(recorder.clone()))
             .add_service(LogsServiceServer::new(recorder.clone()))
             .add_service(MetricsServiceServer::new(recorder))

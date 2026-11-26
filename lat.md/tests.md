@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and OTel field keys in `observability-core`.
 
-In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, and OTLP headers.
+In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, and TLS export.
 
 ## Runtime gate
 
@@ -151,3 +151,15 @@ From a test thread with no tokio runtime, header `x-api-key: k1` over HTTP reach
 ### Invalid header is rejected on both protocols
 
 A header named `x api`, or `x-api-key` with value `k1` plus a newline, returns `OtlpError::InvalidHeader` with that name on gRPC and HTTP, and the error text omits the value.
+
+## TLS export
+
+Export over TLS to the mock collectors, which serve certificates from a PKI that `rcgen` generates at test time.
+
+### Custom CA and client cert export on both transports
+
+With `TlsRoots::CaFileOnly`, the test CA as `ca_file`, and the test client certificate, traces over gRPC and metrics over HTTP reach TLS mocks that require a client certificate from the test CA.
+
+### Export without client cert is rejected
+
+The same mocks receive nothing from a config without `client_cert`, on either transport, and dropping both guards still returns.
