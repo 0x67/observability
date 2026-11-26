@@ -138,8 +138,10 @@ alone.
 A virtual Cargo workspace (`members = ["crates/*"]`) with two members. It is one git repo,
 self-sufficient when cloned alone.
 
-- MSRV / edition: Rust 1.96.1, edition 2024 (pinned in `rust-toolchain.toml` and
-  `[workspace.package]`).
+- MSRV / edition: Rust 1.88.0, edition 2024 (pinned in `rust-toolchain.toml` and
+  `[workspace.package]`). The MSRV is the highest `rust-version` in the locked dependency
+  graph for the CI platforms, and the CI MSRV cell builds and tests on it. `resolver = "3"`
+  keeps `cargo update` on versions that fit it.
 - Release profile: `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`.
 - Distribution: `publish = false`, consumed by git tag (`observability-v0.2.0`,
   `observability-core-v0.2.0`), not crates.io.
