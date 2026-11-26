@@ -21,6 +21,8 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 metrics = { workspace = true }
 thiserror = { workspace = true }
+# `serde`: Deserialize for every config type, so a service reads its config from a file.
+serde = { workspace = true, optional = true }
 # otel grouping feature.
 tracing-opentelemetry = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
@@ -87,9 +89,11 @@ otel-logs = ["otel", "dep:opentelemetry-appender-tracing"]
 metrics-prom = ["dep:metrics-exporter-prometheus"]
 metrics-otel = ["otel", "dep:metrics-exporter-otel"]
 bunyan = ["dep:tracing-bunyan-formatter"]
+serde = ["dep:serde"]
 
 [dev-dependencies]
 rcgen = { workspace = true }
+serde_json = { workspace = true }
 rustls = { workspace = true }
 tonic = { workspace = true, features = ["transport", "router", "codegen", "tls-ring"] }
 opentelemetry-proto = { workspace = true, features = [

@@ -32,6 +32,8 @@ pub use pipeline::{PipelineGuard, init_pipeline};
 /// Both subsystems in one value. `metrics` is optional so a build can run logging + tracing
 /// without a recorder. The default is the default pipeline with no metrics recorder.
 #[derive(Default)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct ObsConfig {
     pub pipeline: PipelineConfig,
     pub metrics: Option<MetricsConfig>,
