@@ -54,11 +54,7 @@ fn export_without_client_cert_is_rejected() {
         MetricsConfig {
             exporter: MetricsExporter::Otlp,
         },
-        Some(&otlp(
-            OtlpProtocol::HttpProtobuf,
-            format!("{http_base}/v1/metrics"),
-            without_cert(),
-        )),
+        Some(&otlp(OtlpProtocol::HttpProtobuf, http_base, without_cert())),
         "tls-no-client-cert",
     )
     .expect("metrics install");

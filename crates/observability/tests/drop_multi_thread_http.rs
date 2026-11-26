@@ -18,13 +18,12 @@ fn obs_guard_drop_inside_async_context_delivers_over_http() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
     let (base, collector) = http_collector::start(None);
-    // `init` shares one OtlpConfig, so metrics post to this path too; the mock takes any path
     let cfg = ObsConfig {
         pipeline: PipelineConfig {
             service_name: "drop-multi-thread".to_owned(),
             level: "info".to_owned(),
             otlp: Some(OtlpConfig {
-                endpoint: format!("{base}/v1/traces"),
+                endpoint: base,
                 protocol: OtlpProtocol::HttpProtobuf,
                 headers: Vec::new(),
                 resource: Vec::new(),

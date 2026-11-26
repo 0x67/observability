@@ -54,11 +54,7 @@ fn platform_verifier_with_extra_root_exports_on_both_transports() {
         MetricsConfig {
             exporter: MetricsExporter::Otlp,
         },
-        Some(&otlp(
-            OtlpProtocol::HttpProtobuf,
-            format!("{http_base}/v1/metrics"),
-            platform(),
-        )),
+        Some(&otlp(OtlpProtocol::HttpProtobuf, http_base, platform())),
         "tls-platform",
     )
     .expect("metrics install");

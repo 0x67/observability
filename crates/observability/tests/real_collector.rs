@@ -5,9 +5,9 @@
 //!     cargo test -p observability --all-features --test real_collector -- --ignored
 //! ```
 //!
-//! The endpoint must serve OTLP over gRPC at its root and over HTTP at `/v1/metrics`, as
-//! managed collectors on port 443 do. Set `OTEL_EXPORTER_OTLP_HEADERS` for collectors that
-//! need an API key; opentelemetry-otlp adds those headers on both transports.
+//! The endpoint must serve OTLP over gRPC at its root and over HTTP at `/v1/metrics` under
+//! it, as managed collectors on port 443 do. Set `OTEL_EXPORTER_OTLP_HEADERS` for collectors
+//! that need an API key; opentelemetry-otlp adds those headers on both transports.
 #![cfg(all(feature = "tls", feature = "metrics-otel"))]
 
 use std::{fs, time::Duration};
@@ -61,10 +61,7 @@ fn https_export_reaches_real_collector() {
         MetricsConfig {
             exporter: MetricsExporter::Otlp,
         },
-        Some(&otlp(
-            OtlpProtocol::HttpProtobuf,
-            format!("{endpoint}/v1/metrics"),
-        )),
+        Some(&otlp(OtlpProtocol::HttpProtobuf, endpoint)),
         "real-collector-test",
     )
     .expect("metrics install");

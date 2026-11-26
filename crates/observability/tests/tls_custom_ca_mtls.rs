@@ -50,11 +50,7 @@ fn custom_ca_and_client_cert_export_on_both_transports() {
         MetricsConfig {
             exporter: MetricsExporter::Otlp,
         },
-        Some(&otlp(
-            OtlpProtocol::HttpProtobuf,
-            format!("{http_base}/v1/metrics"),
-            pki.otlp_tls(),
-        )),
+        Some(&otlp(OtlpProtocol::HttpProtobuf, http_base, pki.otlp_tls())),
         "tls-mtls",
     )
     .expect("metrics install");

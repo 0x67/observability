@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, TLS export, and guard drop.
+In `observability` they cover the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -221,6 +221,20 @@ From a test thread with no tokio runtime, header `x-api-key: k1` over HTTP reach
 ### Invalid header is rejected on both protocols
 
 A header named `x api`, or `x-api-key` with value `k1` plus a newline, returns `OtlpError::InvalidHeader` with that name on gRPC and HTTP, and the error text omits the value.
+
+## OTLP signal paths
+
+`OtlpConfig::endpoint` is the collector base URL, and HTTP export appends each signal's path to it.
+
+### Signal URL appends the signal path
+
+`http://c:4318` with `/v1/traces` gives `http://c:4318/v1/traces`. `http://c:4318/` with `/v1/logs` gives `http://c:4318/v1/logs`, with one slash. `https://c/otlp` with `/v1/metrics` gives `https://c/otlp/v1/metrics`.
+
+### One endpoint sends each signal to its path
+
+One HTTP/protobuf `OtlpConfig` at the HTTP mock's base URL drives tracing, an OTLP log sink, and OTLP metrics through `init`.
+
+After one span, one `info!`, one counter, and the guard drop, the span arrived in a `POST /v1/traces`, the log record in a `POST /v1/logs`, and the counter in a `POST /v1/metrics`. Every traces request carries the configured `service.name`.
 
 ## TLS export
 

@@ -22,7 +22,7 @@ fn tracing_on_keeps_global_max_level_and_drops_debug_spans() {
         service_name: "level-hint".to_owned(),
         level: "info".to_owned(),
         otlp: Some(OtlpConfig {
-            endpoint: format!("{base}/v1/traces"),
+            endpoint: base,
             protocol: OtlpProtocol::HttpProtobuf,
             headers: Vec::new(),
             resource: Vec::new(),
