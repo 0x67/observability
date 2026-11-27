@@ -80,9 +80,11 @@ recovered rather than propagated, and telemetry survives a panicked holder.
 
 ## Optional tokio flusher
 
+<!-- x-release-please-start-version -->
 ```toml
-observability-core = { git = "...", tag = "observability-core-v0.2.0", features = ["flush-tokio"] }
+observability-core = { git = "...", tag = "observability-core-v0.2.1", features = ["flush-tokio"] }
 ```
+<!-- x-release-please-end -->
 
 ```rust,no_run
 use std::time::Duration;

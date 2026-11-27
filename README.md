@@ -15,10 +15,12 @@ records latency and message counts but must stay free of backend crates.
 
 ## Quickstart
 
+<!-- x-release-please-start-version -->
 ```toml
 [dependencies]
 observability = { git = "https://github.com/0x67/observability", tag = "observability-v0.2.2" }
 ```
+<!-- x-release-please-end -->
 
 Using both crates? Pin both to the same tag, the newest one of either component. Two tags
 on one git url check out two copies of the repository, and `observability-core` types from
