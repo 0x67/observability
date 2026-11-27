@@ -1,19 +1,17 @@
 //! TLS settings for `https://` OTLP endpoints, and the checked material both transports
 //! build their TLS config from.
 
-#[cfg(feature = "tls")]
-use std::path::Path;
 use std::path::PathBuf;
-#[cfg(feature = "tls-platform-verifier")]
-use std::sync::Arc;
+#[cfg(feature = "tls")]
+use std::{path::Path, sync::Arc};
 
 #[cfg(feature = "tls")]
 use opentelemetry_otlp::tonic_types::transport::{Certificate, ClientTlsConfig, Identity};
-#[cfg(feature = "tls-platform-verifier")]
+#[cfg(feature = "tls")]
 use rustls::{
-    ClientConfig,
+    ClientConfig, RootCertStore,
     crypto::CryptoProvider,
-    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+    pki_types::{CertificateDer, PrivateKeyDer, pem, pem::PemObject},
 };
 #[cfg(feature = "tls-platform-verifier")]
 use rustls_platform_verifier::Verifier;
@@ -71,6 +69,8 @@ pub struct ClientCert {
 #[cfg(feature = "tls")]
 pub(crate) struct TlsMaterial {
     roots: TlsRoots,
+    // the OS store for `TlsRoots::Native`, empty for the other roots
+    native_roots: Vec<CertificateDer<'static>>,
     ca_pem: Option<Vec<u8>>,
     client: Option<ClientPem>,
 }
@@ -83,30 +83,23 @@ struct ClientPem {
 }
 
 #[cfg(feature = "tls")]
-impl ClientPem {
-    // reqwest's rustls identity takes one buffer holding the key and the chain
-    fn reqwest_identity(&self) -> reqwest::Result<reqwest::Identity> {
-        reqwest::Identity::from_pem(&[self.key.as_slice(), self.chain.as_slice()].concat())
-    }
-}
-
-#[cfg(feature = "tls")]
 impl TlsMaterial {
     pub(crate) fn load(tls: &OtlpTls) -> Result<Self, OtlpError> {
-        match tls.roots {
-            TlsRoots::Native => require_native_roots()?,
-            TlsRoots::Webpki => require_webpki_feature()?,
-            TlsRoots::Platform => require_platform_feature()?,
+        let native_roots = match tls.roots {
+            TlsRoots::Native => native_roots()?,
+            TlsRoots::Webpki => require_webpki_feature().map(|()| Vec::new())?,
+            TlsRoots::Platform => require_platform_feature().map(|()| Vec::new())?,
             TlsRoots::CaFileOnly if tls.ca_file.is_none() => {
                 return Err(OtlpError::NoTrustAnchors);
             }
-            TlsRoots::CaFileOnly => {}
-        }
+            TlsRoots::CaFileOnly => Vec::new(),
+        };
 
         let ca_pem = tls.ca_file.as_deref().map(read_certificates).transpose()?;
         let client = tls.client_cert.as_ref().map(read_client_pem).transpose()?;
         Ok(Self {
             roots: tls.roots,
+            native_roots,
             ca_pem,
             client,
         })
@@ -129,34 +122,62 @@ impl TlsMaterial {
         }
     }
 
+    // reqwest 0.13 has no root store features, and its own config fails the build on any
+    // OS certificate rustls cannot parse, so the crate hands it a finished rustls config
     pub(crate) fn apply_to_reqwest(
         &self,
         builder: reqwest::ClientBuilder,
     ) -> Result<reqwest::ClientBuilder, OtlpError> {
-        #[cfg(feature = "tls-platform-verifier")]
-        if self.uses_platform_verifier() {
-            return Ok(builder.use_preconfigured_tls(self.platform_rustls_config()?));
-        }
+        Ok(builder.tls_backend_preconfigured(self.rustls_config()?))
+    }
 
-        // start from no roots, then add exactly the ones configured
-        let builder = builder.use_rustls_tls().tls_built_in_root_certs(false);
-        let mut builder = match self.roots {
-            TlsRoots::Native => builder.tls_built_in_native_certs(true),
-            #[cfg(feature = "tls-webpki-roots")]
-            TlsRoots::Webpki => builder.tls_built_in_webpki_certs(true),
-            _ => builder,
+    /// rustls config for the HTTP client: the configured roots or the OS verifier, and the
+    /// client certificate.
+    fn rustls_config(&self) -> Result<ClientConfig, OtlpError> {
+        let provider = process_or_aws_lc_provider();
+        let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()
+            .map_err(OtlpError::build)?;
+
+        #[cfg(feature = "tls-platform-verifier")]
+        let builder = if self.uses_platform_verifier() {
+            // rustls names every custom verifier hook `dangerous`; this one checks the full chain
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(self.platform_verifier(provider)?)
+        } else {
+            builder.with_root_certificates(self.root_store()?)
         };
+        #[cfg(not(feature = "tls-platform-verifier"))]
+        let builder = builder.with_root_certificates(self.root_store()?);
 
         // both PEM inputs parsed in `load`, so these errors are not expected here
+        match &self.client {
+            Some(client) => {
+                let chain = pem_certificates(&client.chain).map_err(OtlpError::build)?;
+                let key = PrivateKeyDer::from_pem_slice(&client.key).map_err(OtlpError::build)?;
+                builder
+                    .with_client_auth_cert(chain, key)
+                    .map_err(OtlpError::build)
+            }
+            None => Ok(builder.with_no_client_auth()),
+        }
+    }
+
+    fn root_store(&self) -> Result<RootCertStore, OtlpError> {
+        let mut store = RootCertStore::empty();
+        // an OS store can hold certificates rustls cannot parse; tonic skips them as well
+        store.add_parsable_certificates(self.native_roots.iter().cloned());
+        #[cfg(feature = "tls-webpki-roots")]
+        if self.roots == TlsRoots::Webpki {
+            store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        }
         if let Some(pem) = &self.ca_pem {
-            for cert in reqwest::Certificate::from_pem_bundle(pem).map_err(OtlpError::build)? {
-                builder = builder.add_root_certificate(cert);
+            for cert in pem_certificates(pem).map_err(OtlpError::build)? {
+                store.add(cert).map_err(OtlpError::build)?;
             }
         }
-        if let Some(client) = &self.client {
-            builder = builder.identity(client.reqwest_identity().map_err(OtlpError::build)?);
-        }
-        Ok(builder)
+        Ok(store)
     }
 }
 
@@ -170,14 +191,14 @@ fn read_certificates(path: &Path) -> Result<Vec<u8>, OtlpError> {
         source,
     };
 
-    match reqwest::Certificate::from_pem_bundle(&pem) {
+    match pem_certificates(&pem) {
         Ok(certs) if !certs.is_empty() => Ok(pem),
         Ok(_) => Err(invalid("no PEM certificate found".into())),
         Err(e) => Err(invalid(Box::new(e))),
     }
 }
 
-/// Read the chain and the key, and check that together they parse as an identity.
+/// Read the chain and the key, and check that both parse.
 #[cfg(feature = "tls")]
 fn read_client_pem(cert: &ClientCert) -> Result<ClientPem, OtlpError> {
     let client = ClientPem {
@@ -185,13 +206,10 @@ fn read_client_pem(cert: &ClientCert) -> Result<ClientPem, OtlpError> {
         key: read_tls_file(&cert.key_file)?,
     };
 
-    // the chain already parsed, so a failure here is the key
-    client
-        .reqwest_identity()
-        .map_err(|e| OtlpError::InvalidPem {
-            path: cert.key_file.clone(),
-            source: Box::new(e),
-        })?;
+    PrivateKeyDer::from_pem_slice(&client.key).map_err(|e| OtlpError::InvalidPem {
+        path: cert.key_file.clone(),
+        source: Box::new(e),
+    })?;
     Ok(client)
 }
 
@@ -203,14 +221,29 @@ fn read_tls_file(path: &Path) -> Result<Vec<u8>, OtlpError> {
     })
 }
 
-/// tonic fails its build on an empty OS store but reqwest only fails at the first
-/// connect, so the check runs here and both transports fail the same way at init.
+/// The OS store. tonic fails its build on an empty store, so an empty store is an error
+/// here and both transports fail the same way at init.
 #[cfg(feature = "tls")]
-fn require_native_roots() -> Result<(), OtlpError> {
-    if rustls_native_certs::load_native_certs().certs.is_empty() {
+fn native_roots() -> Result<Vec<CertificateDer<'static>>, OtlpError> {
+    let roots = rustls_native_certs::load_native_certs().certs;
+    if roots.is_empty() {
         return Err(OtlpError::NoNativeRoots);
     }
-    Ok(())
+    Ok(roots)
+}
+
+/// The process-wide rustls provider when the app installed one, aws-lc-rs otherwise, the
+/// same choice tonic and reqwest make.
+#[cfg(feature = "tls")]
+fn process_or_aws_lc_provider() -> Arc<CryptoProvider> {
+    CryptoProvider::get_default()
+        .cloned()
+        .unwrap_or_else(|| Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+}
+
+#[cfg(feature = "tls")]
+fn pem_certificates(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, pem::Error> {
+    CertificateDer::pem_slice_iter(pem).collect()
 }
 
 #[cfg(feature = "tls-platform-verifier")]
@@ -229,28 +262,10 @@ impl TlsMaterial {
             }
             None => ClientTlsConfig::new(),
         };
-        Ok((config, self.platform_verifier(process_or_ring_provider())?))
-    }
-
-    /// rustls config for reqwest's `use_preconfigured_tls`.
-    fn platform_rustls_config(&self) -> Result<ClientConfig, OtlpError> {
-        let provider = process_or_ring_provider();
-        let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
-            .with_safe_default_protocol_versions()
-            .map_err(platform_error)?
-            // rustls names every custom verifier hook `dangerous`; this one checks the full chain
-            .dangerous()
-            .with_custom_certificate_verifier(self.platform_verifier(provider)?);
-
-        match &self.client {
-            Some(client) => {
-                let key = PrivateKeyDer::from_pem_slice(&client.key).map_err(platform_error)?;
-                builder
-                    .with_client_auth_cert(pem_certificates(&client.chain)?, key)
-                    .map_err(platform_error)
-            }
-            None => Ok(builder.with_no_client_auth()),
-        }
+        Ok((
+            config,
+            self.platform_verifier(process_or_aws_lc_provider())?,
+        ))
     }
 
     /// The OS verifier, with `ca_file` certificates as extra roots where the platform
@@ -259,7 +274,10 @@ impl TlsMaterial {
         let verifier = match &self.ca_pem {
             None => Verifier::new(provider),
             #[cfg(not(target_os = "android"))]
-            Some(pem) => Verifier::new_with_extra_roots(pem_certificates(pem)?, provider),
+            Some(pem) => Verifier::new_with_extra_roots(
+                pem_certificates(pem).map_err(platform_error)?,
+                provider,
+            ),
             #[cfg(target_os = "android")]
             Some(_) => {
                 return Err(OtlpError::PlatformVerifier(
@@ -269,22 +287,6 @@ impl TlsMaterial {
         };
         verifier.map(Arc::new).map_err(platform_error)
     }
-}
-
-/// The process-wide rustls provider when the app installed one, ring otherwise, the same
-/// choice tonic and reqwest make.
-#[cfg(feature = "tls-platform-verifier")]
-fn process_or_ring_provider() -> Arc<CryptoProvider> {
-    CryptoProvider::get_default()
-        .cloned()
-        .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()))
-}
-
-#[cfg(feature = "tls-platform-verifier")]
-fn pem_certificates(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, OtlpError> {
-    CertificateDer::pem_slice_iter(pem)
-        .collect::<Result<_, _>>()
-        .map_err(platform_error)
 }
 
 #[cfg(feature = "tls-platform-verifier")]

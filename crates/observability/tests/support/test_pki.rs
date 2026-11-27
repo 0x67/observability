@@ -32,9 +32,8 @@ pub struct TestPki {
 
 /// Generate a PKI whose client files live in a temp dir named after `test`.
 pub fn generate(test: &str) -> TestPki {
-    // tonic's TLS server takes rustls's process-wide provider, and test builds compile both
-    // ring and aws-lc, so rustls cannot pick one by itself; the crate uses ring as well
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // tonic's TLS server takes rustls's process-wide provider; the crate uses aws-lc-rs as well
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);

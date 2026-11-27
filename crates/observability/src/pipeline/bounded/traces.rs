@@ -113,15 +113,15 @@ impl<E: SpanExporter> SpanExporter for CountingSpanExporter<E> {
         result
     }
 
-    fn shutdown_with_timeout(&mut self, timeout: Duration) -> OTelSdkResult {
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         self.inner.shutdown_with_timeout(timeout)
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         self.inner.shutdown()
     }
 
-    fn force_flush(&mut self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         self.inner.force_flush()
     }
 
