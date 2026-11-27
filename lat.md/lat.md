@@ -74,6 +74,12 @@ TLS applies only to `https://` endpoints, so `http://localhost` stays plain text
 
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.
 
+## Redaction
+
+The crate redacts only its own config: `OtlpConfig`'s `Debug` hides header values, and init rejects an endpoint with credentials. Application values are left to secret types in the app and to an OTel Collector.
+
+The `## Redaction` section of [[crates/observability/README.md]] covers `secrecy::SecretString` and `veil::Redact`, the collector config in `docs/otel-collector-redaction.yaml`, and why an `http://` endpoint suits only a collector on the same host. It also lists what the crate never redacts: log messages, OTLP log bodies, span names, span event names, metric labels, and resource attributes.
+
 ## Bounded delivery and drop counters
 
 Every queue between the app and a sink has a fixed bound, and every item lost to a full queue is counted.

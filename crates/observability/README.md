@@ -145,6 +145,75 @@ example aws-lc for FIPS; both transports then use the app's provider. The crate 
 `OTEL_EXPORTER_OTLP_CLIENT_KEY`; TLS comes from `OtlpConfig::tls` only. No setting skips
 certificate or hostname verification.
 
+## Redaction
+
+Secrets get into logs, spans, and exports from two sources: the crate's own config and the
+values the application records.
+
+1. The crate redacts its own config. `OtlpConfig`'s `Debug` prints each header name with
+   `[REDACTED]` in place of its value, so `?cfg` on an `OtlpConfig` or a `PipelineConfig` never
+   prints an API key. An endpoint with a user name or password fails init with
+   `OtlpError::EndpointCredentials`, as described under [Shared OTLP](#shared-otlp).
+
+2. The application keeps its secrets in secret types. Hold a credential in
+   `secrecy::SecretString`: its `Debug` prints `SecretBox<str>([REDACTED])`, and
+   `expose_secret()` returns the value where the code needs it, such as an OTLP header.
+
+   ```rust,ignore
+   // application Cargo.toml: secrecy = "0.10"
+   use std::collections::BTreeMap;
+
+   use observability::OtlpConfig;
+   use secrecy::{ExposeSecret, SecretString};
+
+   let api_key = SecretString::from(std::env::var("BACKEND_API_KEY")?);
+   tracing::info!(api_key = ?api_key, "connecting"); // prints SecretBox<str>([REDACTED])
+   let otlp = OtlpConfig {
+       headers: BTreeMap::from([("x-api-key".into(), api_key.expose_secret().to_owned())]),
+       ..OtlpConfig::default()
+   };
+   ```
+
+   For a struct that is logged whole, derive `veil::Redact` and mark each secret field with
+   `#[redact(fixed = N)]`, which always prints N asterisks. A plain `#[redact]` writes `*` for
+   each letter and digit but keeps the value's length and punctuation.
+
+   ```rust,ignore
+   // application Cargo.toml: veil = "0.3"
+   #[derive(veil::Redact)]
+   struct Login {
+       user: String,
+       #[redact(fixed = 8)]
+       password: String,
+   }
+   // `?login` prints the password as ********; a plain #[redact] would keep its length and punctuation
+   ```
+
+3. An OTel Collector scrubs what the application still records, such as a token in a URL query
+   or an email address in a log message.
+   [`docs/otel-collector-redaction.yaml`](../../docs/otel-collector-redaction.yaml) runs three
+   contrib processors in the traces and logs pipelines, ahead of `batch`:
+   1. `redaction` masks the values of keys that look like credentials (password, secret,
+      token, authorization, API key) and card numbers in any value, and `summary: info` adds
+      counts of what it masked.
+   2. `attributes/scrub` deletes `http.request.header.cookie` and replaces `enduser.id` with
+      its hash.
+   3. `transform/scrub` rewrites `token=` values in a span's `url.query` attribute and
+      replaces email addresses in log bodies with `[EMAIL]`.
+
+   `redaction` is first in each pipeline, and `attributes/scrub` and `transform/scrub` see the
+   masked values. Use the file as is, or copy its processors into the collector config you
+   already run.
+
+4. Collector-side scrubbing runs after the data leaves the process, so unscrubbed values are sent
+   over the OTLP connection to the collector. The default `tls` feature encrypts that connection
+   only for an `https://` endpoint. Use `https://` unless the collector runs on the same host.
+
+5. The crate never redacts log messages, OTLP log bodies, span names, span event names, metric
+   labels, or resource attributes, so keep secrets and personal data out of them. Record
+   `observability_core::field::ENDUSER_ID` on spans and logs only, never as a metric label: a
+   per-user label exposes the user and grows the label set without bound.
+
 ## Feature model
 
 `otel` is the grouping feature; per-signal features layer on top of it. No feature is named

@@ -1,0 +1,56 @@
+# Scrubs span and log attributes, and email addresses in log bodies, before export.
+# Run it as is, or copy the processors into the collector config you already run.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  # mask the values of credential-like keys, and card numbers in any value
+  redaction:
+    allow_all_keys: true
+    blocked_key_patterns:
+      - '(?i)pass(word)?'
+      - '(?i)secret'
+      - '(?i)token'
+      - '(?i)authorization'
+      - '(?i)api[_.-]?key'
+    blocked_values:
+      - '\b(?:\d[ -]?){13,19}\b'
+    summary: info
+  attributes/scrub:
+    actions:
+      - key: http.request.header.cookie
+        action: delete
+      - key: enduser.id
+        action: hash
+  # no capture groups: the collector expands `$` in config values
+  transform/scrub:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - replace_pattern(attributes["url.query"], "token=[^&]*", "token=***")
+    log_statements:
+      - context: log
+        statements:
+          - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "[EMAIL]")
+  batch: {}
+
+exporters:
+  otlphttp:
+    endpoint: https://backend.example.com
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [redaction, attributes/scrub, transform/scrub, batch]
+      exporters: [otlphttp]
+    logs:
+      receivers: [otlp]
+      processors: [redaction, attributes/scrub, transform/scrub, batch]
+      exporters: [otlphttp]
