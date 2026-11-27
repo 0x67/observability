@@ -215,6 +215,15 @@ directory. `max_files: Some(n)` keeps at most `n` files with the sink's prefix i
 oldest are pruned when the sink opens and on each rotation, which means a restart enforces the
 limit too. `max_files: None` keeps every file.
 
+## Delivery limits
+
+Span export holds at most `TracingConfig::batch.queue_size` spans (an `ExportBatch`, 2048 by
+default) from span end to the end of their export. A span past that bound is dropped, and so is
+every span in a batch whose export fails. Each drop is counted in `PipelineGuard::dropped()` and
+in the `observability.dropped` counter, labeled by `signal` and `reason`. The SDK's
+`OTEL_BSP_*` env vars are not read: `ExportBatch::queue_size`, `max_batch_size`, and `delay`
+replace them, because counting drops exactly needs the queue size the crate sets.
+
 ## Building without backends
 
 With `--no-default-features`, the otel and recorder wiring is compiled out. Config that needs a

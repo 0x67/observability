@@ -5,10 +5,15 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 #[cfg(feature = "otel-logs")]
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+use opentelemetry_sdk::trace::{BatchSpanProcessor, Sampler, SdkTracerProvider};
 use tracing_subscriber::Layer;
 
-use super::{BoxedLayer, filter::otlp_filter};
+use super::{
+    BoxedLayer,
+    bounded::{BoundedSpanProcessor, bounded_span_chain},
+    dropped::DropCounters,
+    filter::otlp_filter,
+};
 use crate::{
     config::{LogSink, LogSinkKind, PipelineConfig, TracingConfig},
     error::{OtlpError, PipelineError, Signal},
@@ -49,6 +54,7 @@ pub(super) fn otel_layers(
     cfg: &PipelineConfig,
     sinks: &[LogSink],
     layers: &mut Vec<BoxedLayer>,
+    dropped: &DropCounters,
 ) -> Result<Option<OtelProviders>, PipelineError> {
     let log_levels: Vec<&str> = sinks
         .iter()
@@ -73,13 +79,21 @@ pub(super) fn otel_layers(
         source,
     })?;
 
+    let inputs = ProviderInputs {
+        otlp,
+        service: &cfg.service_name,
+        runtime: &runtime,
+        dropped,
+    };
+
     let tracer = match &cfg.tracing {
         Some(tracing) => {
-            let provider = build_tracer_provider(otlp, &cfg.service_name, &runtime, tracing)
-                .map_err(|source| PipelineError::Exporter {
+            let provider = build_tracer_provider(&inputs, tracing).map_err(|source| {
+                PipelineError::Exporter {
                     signal: Signal::Traces,
                     source,
-                })?;
+                }
+            })?;
             let level = tracing.level.as_deref().unwrap_or(&cfg.level);
             layers.push(trace_layer(&provider, level));
             Some(provider)
@@ -93,11 +107,9 @@ pub(super) fn otel_layers(
         None
     } else {
         let provider =
-            build_logger_provider(otlp, &cfg.service_name, &runtime).map_err(|source| {
-                PipelineError::Exporter {
-                    signal: Signal::Logs,
-                    source,
-                }
+            build_logger_provider(&inputs).map_err(|source| PipelineError::Exporter {
+                signal: Signal::Logs,
+                source,
             })?;
         layers.extend(
             log_levels
@@ -132,16 +144,30 @@ fn log_bridge_layer(provider: &SdkLoggerProvider, level: &str) -> BoxedLayer {
         .boxed()
 }
 
+/// What both provider builders share.
+struct ProviderInputs<'a> {
+    otlp: &'a OtlpConfig,
+    service: &'a str,
+    runtime: &'a ExportRuntime,
+    dropped: &'a DropCounters,
+}
+
+/// The bounded span chain over the OTLP span exporter.
+fn bounded_span_processor(
+    inputs: &ProviderInputs<'_>,
+    tracing: &TracingConfig,
+) -> Result<BoundedSpanProcessor<BatchSpanProcessor>, OtlpError> {
+    let exporter = inputs.otlp.span_exporter(inputs.runtime)?;
+    Ok(bounded_span_chain(exporter, &tracing.batch, inputs.dropped))
+}
+
 fn build_tracer_provider(
-    otlp: &OtlpConfig,
-    service: &str,
-    runtime: &ExportRuntime,
+    inputs: &ProviderInputs<'_>,
     tracing: &TracingConfig,
 ) -> Result<SdkTracerProvider, OtlpError> {
-    let exporter = otlp.span_exporter(runtime)?;
     let builder = SdkTracerProvider::builder()
-        .with_batch_exporter(exporter)
-        .with_resource(otlp.otel_resource(service));
+        .with_span_processor(bounded_span_processor(inputs, tracing)?)
+        .with_resource(inputs.otlp.otel_resource(inputs.service));
     // without a sampler set, the SDK reads OTEL_TRACES_SAMPLER
     let builder = match tracing.sample_ratio {
         Some(ratio) => builder.with_sampler(Sampler::ParentBased(Box::new(
@@ -154,14 +180,10 @@ fn build_tracer_provider(
 }
 
 #[cfg(feature = "otel-logs")]
-fn build_logger_provider(
-    otlp: &OtlpConfig,
-    service: &str,
-    runtime: &ExportRuntime,
-) -> Result<SdkLoggerProvider, OtlpError> {
-    let exporter = otlp.log_exporter(runtime)?;
+fn build_logger_provider(inputs: &ProviderInputs<'_>) -> Result<SdkLoggerProvider, OtlpError> {
+    let exporter = inputs.otlp.log_exporter(inputs.runtime)?;
     Ok(SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)
-        .with_resource(otlp.otel_resource(service))
+        .with_resource(inputs.otlp.otel_resource(inputs.service))
         .build())
 }

@@ -25,6 +25,8 @@ use crate::{
     error::PipelineError,
 };
 
+#[cfg(feature = "otel")]
+mod bounded;
 mod dropped;
 mod filter;
 mod guard;
@@ -117,7 +119,7 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
     }
 
     #[cfg(feature = "otel")]
-    let otel = otel_layers(cfg, sinks, &mut layers)?;
+    let otel = otel_layers(cfg, sinks, &mut layers, &dropped)?;
     #[cfg(not(feature = "otel"))]
     reject_otlp_signals(cfg, sinks)?;
 

@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue and drop counters, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -172,7 +172,25 @@ With `Overflow::Block`, a second thread writes the 10 lines and waits on the ful
 
 ### Add updates totals and metric
 
-Under a `DebuggingRecorder` set with `metrics::with_local_recorder`, adding 2 and then 1 dropped log lines gives `Dropped { traces: 0, logs: 3 }` and one `observability.dropped` counter at 3 labeled `signal="logs"` and `reason="buffer_full"`.
+Under a `DebuggingRecorder` set with `metrics::with_local_recorder`, 2 spans dropped as `QueueFull` and 3 log lines as `BufferFull` give `Dropped { traces: 2, logs: 3 }`.
+
+`observability.dropped` reads 2 for `signal="traces"`, `reason="queue_full"` and 3 for `signal="logs"`, `reason="buffer_full"`.
+
+## Bounded export queues
+
+The bounded span chain runs against test exporters whose first export waits on a gate, fails, or succeeds.
+
+### Bounded span processor drops and counts past queue size
+
+With `queue_size` 4, `max_batch_size` 1, and the first export stalled, 10 ended spans leave `Dropped::traces` at 6. After the gate opens and the provider shuts down, the exporter has received exactly 4 spans and the count is still 6.
+
+### Failed export frees slots and counts the batch
+
+With `queue_size` 4 and a first export that fails, 3 spans and a flush give `Dropped::traces` 3. Four more spans then all fit, and the next flush exports all 4.
+
+### Wrappers forward resource to exporter
+
+A provider with resource `service.name=res-probe` passes it through both wrappers: after a flush, the test exporter's last `set_resource` call holds `service.name` `res-probe`.
 
 ## Trace context propagation
 

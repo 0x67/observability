@@ -9,6 +9,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     num::NonZeroUsize,
     path::PathBuf,
+    time::Duration,
 };
 
 use crate::otlp::OtlpConfig;
@@ -165,7 +166,44 @@ pub struct TracingConfig {
     /// parent's decision. `None` keeps the SDK default, which reads `OTEL_TRACES_SAMPLER`
     /// and samples every span when it is unset.
     pub sample_ratio: Option<f64>,
+    pub batch: ExportBatch,
 }
+
+/// Export batching and the queue bound for one OTLP signal. These values replace the SDK's
+/// `OTEL_BSP_*` and `OTEL_BLRP_*` env vars, which are not read.
+///
+/// The default holds 2048 items, sends up to 512 per request, and exports a partial batch
+/// after 5 s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
+pub struct ExportBatch {
+    /// Most items held from span end (or log emit) to the end of their export. Items past
+    /// it are dropped and counted.
+    pub queue_size: NonZeroUsize,
+    /// Most items per export request, capped at `queue_size`.
+    pub max_batch_size: NonZeroUsize,
+    /// Longest wait before a partial batch is exported.
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "delay_ms", with = "crate::config::duration_ms")
+    )]
+    pub delay: Duration,
+}
+
+impl Default for ExportBatch {
+    fn default() -> Self {
+        Self {
+            queue_size: DEFAULT_EXPORT_QUEUE,
+            max_batch_size: DEFAULT_EXPORT_BATCH,
+            delay: Duration::from_secs(5),
+        }
+    }
+}
+
+// the SDK's defaults; the unwraps run at compile time
+const DEFAULT_EXPORT_QUEUE: NonZeroUsize = NonZeroUsize::new(2048).unwrap();
+const DEFAULT_EXPORT_BATCH: NonZeroUsize = NonZeroUsize::new(512).unwrap();
 
 /// Metrics subsystem config: which recorder backs the `metrics` facade.
 #[derive(Clone, Debug, Default)]
