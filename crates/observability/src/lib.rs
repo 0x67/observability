@@ -20,8 +20,8 @@ pub mod propagation;
 mod redact;
 
 pub use config::{
-    LineQueue, LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter,
-    Overflow, PipelineConfig, Rotation, TracingConfig,
+    ExportBatch, LineQueue, LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig,
+    MetricsExporter, Overflow, PipelineConfig, Rotation, TracingConfig,
 };
 #[cfg(feature = "otel")]
 pub use error::PropagationError;

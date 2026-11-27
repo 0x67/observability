@@ -80,6 +80,10 @@ A lossy `NonBlocking` returns `Ok` for a dropped line and only bumps its `ErrorC
 
 [[crates/observability/src/pipeline/dropped.rs#DropCounters]] holds one pipeline's totals per signal. `add` updates the total and increments the `observability.dropped` counter with `signal` and `reason` labels, which Prometheus writes as `observability_dropped`. A drop before a metrics recorder is installed reaches only the total. `PipelineGuard::dropped` returns the totals as a [[crates/observability/src/pipeline/dropped.rs#Dropped]], so a service without a recorder can read them too.
 
+Span export goes through [[crates/observability/src/pipeline/bounded/traces.rs#BoundedSpanProcessor]] in front of the SDK's `BatchSpanProcessor`, whose exporter is wrapped by a counter. The bound is `TracingConfig::batch.queue_size`, an [[crates/observability/src/config.rs#ExportBatch]] set explicitly, so `OTEL_BSP_*` is not read: the SDK keeps its resolved queue size private, and exact counting needs it.
+
+The SDK drops on a full channel with only a log line, so the bounded processor decides first. A span takes a slot in a shared `InFlight` count when it ends and frees it when its batch's export returns. That count never falls below the spans in the SDK channel of the same capacity, so the SDK never finds the channel full and every drop is counted here, as `queue_full`. A failed export counts its batch as `export_failed` and still frees its slots. Spans in the worker's pending batch and in a running export count against the bound too, so memory stays under `queue_size` spans in total. Both wrappers forward `set_resource`, the only way the provider's resource reaches the OTLP exporter.
+
 ## Trace context propagation
 
 With tracing on, a successful [[crates/observability/src/pipeline/mod.rs#init_pipeline]] sets the W3C `TraceContextPropagator` as the process-wide OTel text map propagator, so OTel-aware HTTP and gRPC middleware works without setup.

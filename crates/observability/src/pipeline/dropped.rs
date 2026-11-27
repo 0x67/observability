@@ -18,12 +18,23 @@ pub struct Dropped {
 /// Why items were dropped; the `reason` label of `observability.dropped`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum DropReason {
+    /// A bounded export queue was full.
+    #[cfg(feature = "otel")]
+    QueueFull,
+    /// The export of the item's batch returned an error.
+    #[cfg(feature = "otel")]
+    ExportFailed,
+    /// A writer sink's line buffer was full.
     BufferFull,
 }
 
 impl DropReason {
     fn as_str(self) -> &'static str {
         match self {
+            #[cfg(feature = "otel")]
+            Self::QueueFull => "queue_full",
+            #[cfg(feature = "otel")]
+            Self::ExportFailed => "export_failed",
             Self::BufferFull => "buffer_full",
         }
     }
@@ -64,7 +75,8 @@ impl DropCounters {
     }
 }
 
-#[cfg(test)]
+// the test needs a trace drop reason, which exists only with `otel`
+#[cfg(all(test, feature = "otel"))]
 mod tests {
     use metrics_util::{
         CompositeKey, MetricKind,
@@ -74,6 +86,27 @@ mod tests {
     use super::{DropCounters, DropReason, Dropped};
     use crate::error::Signal;
 
+    // the counter's value for one label pair, or None when it was never incremented
+    fn dropped_counter(
+        counted: &[(CompositeKey, DebugValue)],
+        labels: [(&str, &str); 2],
+    ) -> Option<u64> {
+        counted.iter().find_map(|(key, value)| {
+            let key_labels: Vec<(&str, &str)> = key
+                .key()
+                .labels()
+                .map(|label| (label.key(), label.value()))
+                .collect();
+            let matches = key.kind() == MetricKind::Counter
+                && key.key().name() == "observability.dropped"
+                && key_labels == labels;
+            match value {
+                DebugValue::Counter(n) if matches => Some(*n),
+                _ => None,
+            }
+        })
+    }
+
     // @lat: [[tests#Drop counters#Add updates totals and metric]]
     #[test]
     fn add_updates_totals_and_metric() {
@@ -82,27 +115,20 @@ mod tests {
         let counters = DropCounters::default();
 
         metrics::with_local_recorder(&recorder, || {
-            counters.add(Signal::Logs, DropReason::BufferFull, 2);
-            counters.add(Signal::Logs, DropReason::BufferFull, 1);
+            counters.add(Signal::Traces, DropReason::QueueFull, 2);
+            counters.add(Signal::Logs, DropReason::BufferFull, 3);
         });
 
-        assert_eq!(counters.snapshot(), Dropped { traces: 0, logs: 3 });
+        assert_eq!(counters.snapshot(), Dropped { traces: 2, logs: 3 });
         let counted: Vec<(CompositeKey, DebugValue)> = snapshotter
             .snapshot()
             .into_vec()
             .into_iter()
             .map(|(key, _, _, value)| (key, value))
             .collect();
-        let [(key, DebugValue::Counter(3))] = counted.as_slice() else {
-            panic!("one counter at 3: {counted:?}");
-        };
-        assert_eq!(key.kind(), MetricKind::Counter);
-        assert_eq!(key.key().name(), "observability.dropped");
-        let labels: Vec<(&str, &str)> = key
-            .key()
-            .labels()
-            .map(|label| (label.key(), label.value()))
-            .collect();
-        assert_eq!(labels, [("signal", "logs"), ("reason", "buffer_full")]);
+        let traces = [("signal", "traces"), ("reason", "queue_full")];
+        let logs = [("signal", "logs"), ("reason", "buffer_full")];
+        assert_eq!(dropped_counter(&counted, traces), Some(2), "{counted:?}");
+        assert_eq!(dropped_counter(&counted, logs), Some(3), "{counted:?}");
     }
 }
