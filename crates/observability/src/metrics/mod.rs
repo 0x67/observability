@@ -25,6 +25,9 @@ use crate::{
     otlp::OtlpConfig,
 };
 
+#[cfg(feature = "metrics-otel")]
+mod otel_recorder;
+
 /// The OTLP meter provider and the export runtime its exporter runs on.
 #[cfg(feature = "metrics-otel")]
 struct OtlpMeter {
@@ -174,8 +177,7 @@ fn install_otlp(
         .with_periodic_exporter(exporter)
         .with_resource(otlp.otel_resource(service_name))
         .build();
-    let recorder =
-        metrics_exporter_otel::OpenTelemetryRecorder::new(provider.meter("observability"));
+    let recorder = otel_recorder::OtelRecorder::new(provider.meter("observability"));
     ::metrics::set_global_recorder(recorder).map_err(|e| MetricsError::Install(Box::new(e)))?;
     Ok(MetricsGuard::new(Some(OtlpMeter {
         provider,

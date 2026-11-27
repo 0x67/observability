@@ -55,7 +55,6 @@ opentelemetry-appender-tracing = "0.31"
 metrics-exporter-prometheus = { version = "0.17", default-features = false, features = [
   "http-listener",
 ] }
-metrics-exporter-otel = "0.3.1"
 # `MetricKindMask` for the Prometheus idle timeout; tests add `debugging` for the
 # in-memory recorder
 metrics-util = { version = "0.20.4", default-features = false }
