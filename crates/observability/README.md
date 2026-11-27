@@ -233,7 +233,7 @@ values the application records.
 | `tls-platform-verifier` | no | `tls` + `rustls-platform-verifier` | `TlsRoots::Platform` |
 | `otel-traces` | no | `otel` | plain alias for `otel` |
 | `otel-logs` | no | `otel` + `opentelemetry-appender-tracing` | OTLP log-bridge sink |
-| `metrics-prom` | yes | `metrics-exporter-prometheus` | Prometheus pull recorder |
+| `metrics-prom` | yes | `metrics-exporter-prometheus` 0.18.3 (licensed `MIT AND Apache-2.0`), `metrics-util` | Prometheus pull recorder |
 | `metrics-otel` | no | `otel` + `metrics-exporter-otel` | OTLP metrics push bridge |
 | `bunyan` | no | `tracing-bunyan-formatter` | bunyan-format log sink |
 

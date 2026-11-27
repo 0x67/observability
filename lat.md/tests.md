@@ -208,6 +208,12 @@ The first scrape has a `req_seconds_bucket` line with `le="0.25"`, the counter, 
 
 One second later the second scrape has no `hits` counter and still has the `limit` gauge. The wait is real time, because the exporter's idle check reads the wall clock.
 
+### Text render matches snapshot
+
+The crate's builder setup renders a described counter, a gauge, and a histogram, one series each, with service `snapshot-svc`. The text equals `metrics/snapshots/prometheus_text.txt`, captured on `metrics-exporter-prometheus` 0.17.2.
+
+One series per kind keeps the line order fixed, since the exporter renders the series of one kind in hash order.
+
 ## Trace context propagation
 
 The string API carries W3C trace context in and out of a span without any `opentelemetry` type. The tests share one pipeline per process with `sample_ratio` 0.
