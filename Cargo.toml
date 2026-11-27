@@ -53,7 +53,7 @@ opentelemetry-proto = { version = "0.33.1", default-features = false }
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
 opentelemetry-appender-tracing = "0.33.1"
 # backend: metrics exporters
-# only the listener: `push-gateway` pulls hyper-rustls with aws-lc-rs, which nothing here uses
+# only the listener: `push-gateway` adds a hyper-rustls client the crate never uses
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false, features = [
   "http-listener",
 ] }

@@ -113,10 +113,12 @@ grouping feature; per-signal features layer on top of it. No feature is named `t
 `metrics`, so a flag never shadows the extern facade crates. Full matrix and the OTLP wiring
 details live in the [`observability` crate README](crates/observability#feature-model).
 
-The whole OTLP stack pins to opentelemetry 0.31: `metrics-exporter-otel` 0.3.1 pins
-`opentelemetry ^0.31`, and every OTLP signal exporter plus the metrics bridge must resolve to
-one `opentelemetry` version, so that crate gates the entire stack. Do not bump one otel crate
-alone.
+The OTLP stack is on opentelemetry 0.33 and `tracing-opentelemetry` 0.34. The opentelemetry
+crates, `tracing-opentelemetry`, `opentelemetry-http`, and `opentelemetry-proto` move as one
+family, because every OTLP signal exporter and the crate's own OTLP metrics recorder share one
+`opentelemetry` version. Export retries transient collector failures within
+`OtlpConfig::timeout`, and the default `tls` feature uses rustls with `aws-lc-rs` on both
+transports.
 
 ## Workspace
 

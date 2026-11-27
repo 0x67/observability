@@ -38,7 +38,10 @@ Installs the `metrics`-facade global recorder chosen by `MetricsExporter`:
 
 - `Prometheus(PrometheusConfig)`: a pull endpoint, by default on `127.0.0.1:9000` with bucketed
   histograms and a `service_name` label on every series.
-- `Otlp`: an OTLP push bridge over the shared `OtlpConfig`.
+- `Otlp`: OTLP push over the shared `OtlpConfig`, through the crate's own recorder,
+  `OtelRecorder`. It creates one OTel instrument per metric key with the key's labels as
+  attributes, and a unit given to `describe_*` before first use goes out as its UCUM string
+  (`s`, `By`, `1`).
 
 The `observability-core` gate flips true only on a successful install; any error path returns
 before touching it. An OTLP exporter that fails to build returns `MetricsError::Exporter`.
@@ -110,6 +113,12 @@ endpoint out. Send credentials in `headers`.
 init. Each exporter uses the transport `protocol` names and ignores
 `OTEL_EXPORTER_OTLP_PROTOCOL` and `OTEL_EXPORTER_OTLP_<SIGNAL>_PROTOCOL`.
 
+An export that gets HTTP 429, 502, 503, or 504, or gRPC `Unavailable`, is retried up to 3 times
+with exponential backoff from 100 ms to 1.6 s plus up to 100 ms of jitter, the opentelemetry-otlp
+default policy. All attempts for one batch share `OtlpConfig::timeout`. A span or log batch
+that still fails is dropped and counted as `export_failed` (see
+[Delivery limits](#delivery-limits)). The policy has no setting.
+
 ### TLS
 
 TLS applies only to `https://` endpoints; `http://localhost` stays plain text. `OtlpConfig::tls`
@@ -144,8 +153,10 @@ On Android, `TlsRoots::Platform` reads state the app sets up through
 `init`. Without it, the verifier panics inside an export task: tokio reports a failed export,
 no batch is delivered, and the process keeps running.
 
-ring is the crypto provider unless the app installs a process-wide rustls provider first, for
-example aws-lc for FIPS; both transports then use the app's provider. The crate does not read
+aws-lc-rs is the crypto provider on both transports unless the app installs a process-wide
+rustls provider first; both transports then use the app's provider. The HTTP client gets a
+rustls config the crate builds, so each `TlsRoots` choice means the same on both transports.
+The crate does not read
 `OTEL_EXPORTER_OTLP_CERTIFICATE`, `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`, or
 `OTEL_EXPORTER_OTLP_CLIENT_KEY`; TLS comes from `OtlpConfig::tls` only. No setting skips
 certificate or hostname verification.
@@ -228,21 +239,20 @@ values the application records.
 | --- | :---: | --- | --- |
 | `logging` | yes | none | stdout / rolling-file log sinks |
 | `otel` | yes | `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, `tracing-opentelemetry`, `tokio`, `reqwest` | gates every OTLP block; backs the tracing span sink; runs the `observability-otlp` export runtime |
-| `tls` | yes | `otel` + rustls (ring) for tonic and reqwest, `rustls-native-certs` | TLS for `https://` endpoints with `TlsRoots::Native` or `CaFileOnly` |
+| `tls` | yes | `otel` + rustls (aws-lc-rs) for tonic and reqwest, `rustls-native-certs` | TLS for `https://` endpoints with `TlsRoots::Native` or `CaFileOnly` |
 | `tls-webpki-roots` | no | `tls` + bundled Mozilla roots | `TlsRoots::Webpki` |
 | `tls-platform-verifier` | no | `tls` + `rustls-platform-verifier` | `TlsRoots::Platform` |
 | `otel-traces` | no | `otel` | plain alias for `otel` |
 | `otel-logs` | no | `otel` + `opentelemetry-appender-tracing` | OTLP log-bridge sink |
 | `metrics-prom` | yes | `metrics-exporter-prometheus` 0.18.3 (licensed `MIT AND Apache-2.0`), `metrics-util` | Prometheus pull recorder |
-| `metrics-otel` | no | `otel` + `metrics-exporter-otel` | OTLP metrics push bridge |
+| `metrics-otel` | no | `otel` + `metrics-util` | OTLP metrics push through the crate's `OtelRecorder` |
 | `bunyan` | no | `tracing-bunyan-formatter` | bunyan-format log sink |
 
 `default = ["logging", "otel", "tls", "metrics-prom"]`.
 
-The whole otel stack pins to opentelemetry 0.31: `metrics-exporter-otel` 0.3.1 pins
-`opentelemetry ^0.31`, and all OTLP signal exporters plus the metrics bridge must resolve to one
-`opentelemetry` version, so that crate is the version bottleneck. Do not bump one otel crate
-alone.
+The OTLP stack is on opentelemetry 0.33 and `tracing-opentelemetry` 0.34. The opentelemetry
+crates, `tracing-opentelemetry`, `opentelemetry-http`, and `opentelemetry-proto` move as one
+family: every OTLP signal exporter and `OtelRecorder` share one `opentelemetry` version.
 
 ## Errors
 
@@ -417,7 +427,8 @@ that thread.
 
 From span end to the end of its export, a span takes one of `TracingConfig::batch.queue_size`
 slots (an `ExportBatch`, 2048 by default). The span that finds them all taken is dropped. So is
-each span in a batch whose export fails. `PipelineGuard::dropped()` counts every drop, and so
+each span in a batch whose export still fails after the retries in
+[Shared OTLP](#shared-otlp). `PipelineGuard::dropped()` counts every drop, and so
 does the `observability.dropped` counter, labeled by `signal` and `reason`. The SDK's
 `OTEL_BSP_*` env vars are not read: `ExportBatch::queue_size`, `max_batch_size`, and `delay`
 replace them, because counting drops exactly needs the queue size the crate sets.
@@ -462,8 +473,7 @@ fn report_drops(guard: &observability::PipelineGuard) {
    `None`.
 4. Each series has a `service_name` label set to the service name passed to `init_metrics`.
 
-The exporter builds with only its `http-listener` feature, without the push-gateway client and
-its `aws-lc-rs` TLS provider.
+The exporter builds with only its `http-listener` feature, without the push-gateway client.
 
 ## Building without backends
 
