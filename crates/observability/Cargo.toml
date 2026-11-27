@@ -96,6 +96,8 @@ serde = ["dep:serde"]
 [dev-dependencies]
 rcgen = { workspace = true }
 serde_json = { workspace = true }
+# examples/quickstart.rs runs under `#[tokio::main]`
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 metrics-util = { workspace = true, features = ["debugging"] }
 rustls = { workspace = true }
 tonic = { workspace = true, features = ["transport", "router", "codegen", "tls-ring"] }
