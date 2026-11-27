@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the metrics recorder guard, the OTLP config debug output, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -264,6 +264,30 @@ A misspelled `servce_name`, and a misspelled `max_file` inside a `rolling_file` 
 ### Drop flips the gate off
 
 Constructing a `MetricsGuard` flips the `observability-core` gate on; dropping that guard flips it back off, proving the recorder lifecycle and the hot-path gate stay in sync.
+
+## OTLP metrics recorder
+
+[[crates/observability/src/metrics/otel_recorder/mod.rs#OtelRecorder]] is checked through `metrics::with_local_recorder` on an `SdkMeterProvider` over the SDK's in-memory exporter, read after one `force_flush`. No test installs a global recorder.
+
+### Counter labels become attributes
+
+`counter!("feed.msgs", "venue" => "x")` incremented by 3 and the same name with `"venue" => "y"` incremented by 5 export as one monotonic `u64` sum named `feed.msgs` with two points: 3 with `venue=x` and 5 with `venue=y`.
+
+### Gauge reports last value after set and increment
+
+`set(2.5)` then `increment(0.5)` on one gauge exports a single `f64` gauge point of 3.0, which fails if the stored f64 bits are written or read as an integer.
+
+### Histogram reports count and sum
+
+`record(0.25)` and `record(0.75)` on a histogram labelled `venue=x` export one `f64` histogram point with count 2, sum 1.0, and the label as its only attribute.
+
+### Described gauge exports UCUM unit and text
+
+`describe_gauge!` with `Unit::Seconds` and `"p99 window"` before the gauge's first use exports unit `s` and that description, through the observable instrument builder.
+
+### Described histogram exports UCUM unit and text
+
+`describe_histogram!` with `Unit::Bytes` and `"payload size"` before the histogram's first use exports unit `By` and that description, through the histogram builder.
 
 ## OTLP config debug output
 
