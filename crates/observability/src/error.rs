@@ -108,6 +108,8 @@ pub enum OtlpError {
     // the endpoint is left out on purpose: it holds the credential
     #[error("the OTLP endpoint contains a user name or password; pass credentials in `headers`")]
     EndpointCredentials,
+    #[error("endpoint {endpoint} needs an http:// or https:// scheme")]
+    EndpointScheme { endpoint: String },
     // the value is left out on purpose: header values are usually credentials
     #[error("header {name:?} is not a valid header name and value")]
     InvalidHeader { name: String },
