@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, init end to end, the rolling file sink, OTLP headers, OTLP signal paths, export retry, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, init end to end, the rolling file sink, OTLP headers, OTLP signal paths, export retry, TLS export, guard drop, and the README compatibility table.
 
 ## Runtime gate
 
@@ -500,3 +500,27 @@ Inside a current_thread runtime, `init` with gRPC tracing and gRPC metrics, a fi
 ### ObsGuard drop inside async context delivers over HTTP
 
 The same steps on a multi-thread runtime over HTTP: the drop inside the async block does not panic, and the HTTP mock received the span and the counter.
+
+## Compatibility table
+
+The README `## Compatibility` table is read with `include_str!` and checked against `Cargo.lock` and the manifests, so a stale row or a second locked otel stack fails `cargo test`.
+
+### Newest row matches the lockfile
+
+The header lists the ten columns in order. The last row holds each listed crate's locked major.minor, `in-crate` while `metrics-exporter-otel` is not locked, and the workspace `rust-version`.
+
+When the last row's tag version equals `CARGO_PKG_VERSION`, its `observability-core` cell must equal the core manifest's version. Before a release the last row is for the upcoming tag, and the core version moves only in the release pull request.
+
+Each failure line gives the column, the README value, and the value in the build.
+
+### Newest row covers the crate version
+
+The last row's tag version is at least `CARGO_PKG_VERSION`, so the release pull request fails until the table has a row for the version it releases.
+
+### Tracked crates have one locked version
+
+Each crate behind a version column has exactly one version in `Cargo.lock`, and `metrics-exporter-otel` at most one. Two `opentelemetry` versions would mean two stacks with separate globals.
+
+### Lock parser reports every version
+
+A synthetic lock with two `tonic` blocks and a `tonic-build` block between them yields both `tonic` versions, so a parser that stops at the first match cannot hide a duplicate.

@@ -74,6 +74,26 @@ record_latency_ns(t0.elapsed().as_nanos() as u64);
 merge_local();
 ```
 
+## Compatibility
+
+Each tag builds against one version of each upstream crate below. An app that also uses
+`opentelemetry` or `metrics` directly needs the same minor version: with a second version,
+Cargo builds two copies, and each copy has a separate global tracer provider or metrics
+recorder.
+
+| observability tag | observability-core | opentelemetry family | tracing-opentelemetry | metrics-exporter-otel | metrics | metrics-exporter-prometheus | tracing / tracing-subscriber | tonic | MSRV |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| observability-v0.2.0 | 0.2.0 | 0.31 | 0.32 | 0.3 | 0.24 | 0.17 | 0.1 / 0.3 | 0.14 | 1.96.1 |
+| observability-v0.2.1 | 0.2.1 | 0.31 | 0.32 | 0.3 | 0.24 | 0.17 | 0.1 / 0.3 | 0.14 | 1.96.1 |
+| observability-v0.2.2 | 0.2.1 | 0.31 | 0.32 | 0.3 | 0.24 | 0.17 | 0.1 / 0.3 | 0.14 | 1.96.1 |
+| observability-v0.3.0 | 0.3.0 | 0.33 | 0.34 | in-crate | 0.24 | 0.18 | 0.1 / 0.3 | 0.14 | 1.88.0 |
+
+Upstream cells hold the major.minor version, since every crate here is 0.x and a 0.x minor
+bump breaks its API. The opentelemetry family is `opentelemetry`, `opentelemetry_sdk`,
+`opentelemetry-otlp`, `opentelemetry-appender-tracing`, `opentelemetry-http`, and
+`opentelemetry-proto`. From 0.3.0 on, `observability` has its own OTLP metrics recorder
+instead of `metrics-exporter-otel`. The `observability-core` and MSRV cells hold full versions.
+
 ## Architecture
 
 `observability` brings up two subsystems that share nothing at runtime except one
@@ -146,3 +166,9 @@ lat check                               # docs graph integrity
 CI runs the shared `0x67/ci` reusable Rust workflows plus a feature-matrix job that
 powersets both crates' features and asserts `observability-core` never pulls in
 `opentelemetry` or `tracing-subscriber`.
+
+The `compat_table` test checks the last row of the [compatibility table](#compatibility)
+against `Cargo.lock` and the manifests. When a pull request moves a listed crate to another
+minor version or changes the MSRV, update the last row, or add a row for the next release if
+the last row's tag is already out. A release pull request fails until the last row is for its
+version.
