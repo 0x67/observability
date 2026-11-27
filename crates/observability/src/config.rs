@@ -231,16 +231,66 @@ pub struct MetricsConfig {
     serde(rename_all = "snake_case", deny_unknown_fields)
 )]
 pub enum MetricsExporter {
-    Prometheus { bind: SocketAddr },
+    Prometheus(PrometheusConfig),
     Otlp,
 }
 
 impl Default for MetricsExporter {
     fn default() -> Self {
-        // loopback, so a default build does not serve metrics on every interface
-        Self::Prometheus {
+        Self::Prometheus(PrometheusConfig::default())
+    }
+}
+
+/// Prometheus pull endpoint. The default listens on `127.0.0.1:9000` and exports bucketed
+/// histograms, with no idle expiry.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
+pub struct PrometheusConfig {
+    /// Listen address. A container scraped from outside sets `0.0.0.0`.
+    pub bind: SocketAddr,
+    pub histograms: PrometheusHistograms,
+    /// Drop a counter or histogram series not updated for this long; gauges are kept. A
+    /// counter that comes back starts at zero, which `rate()` reads as a reset.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            rename = "idle_timeout_ms",
+            with = "crate::config::duration_ms::option"
+        )
+    )]
+    pub idle_timeout: Option<Duration>,
+}
+
+impl Default for PrometheusConfig {
+    fn default() -> Self {
+        Self {
+            // loopback, so a default build does not serve metrics on every interface
             bind: SocketAddr::from((Ipv4Addr::LOCALHOST, 9000)),
+            histograms: PrometheusHistograms::default(),
+            idle_timeout: None,
         }
+    }
+}
+
+/// How Prometheus exports histograms.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum PrometheusHistograms {
+    /// Cumulative buckets with these upper bounds, in seconds, which combine across
+    /// instances in PromQL.
+    Buckets(Vec<f64>),
+    /// Quantile summaries, which do not combine across instances.
+    Summaries,
+}
+
+impl Default for PrometheusHistograms {
+    /// The Prometheus client default seconds buckets.
+    fn default() -> Self {
+        Self::Buckets(vec![
+            0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+        ])
     }
 }
 
@@ -253,6 +303,19 @@ pub(crate) mod duration_ms {
 
     pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         u64::deserialize(d).map(Duration::from_millis)
+    }
+
+    /// The same for an optional duration; `null` or an omitted field is `None`.
+    pub(crate) mod option {
+        use std::time::Duration;
+
+        use serde::{Deserialize, Deserializer};
+
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<Option<Duration>, D::Error> {
+            Option::<u64>::deserialize(d).map(|ms| ms.map(Duration::from_millis))
+        }
     }
 }
 
@@ -335,6 +398,28 @@ mod tests {
 
         let logging = cfg.pipeline.logging.expect("logging is set");
         assert_eq!(logging.otlp_batch.delay, Duration::from_secs(1));
+    }
+
+    // @lat: [[tests#Config files#Prometheus settings parse from file]]
+    #[test]
+    fn prometheus_settings_parse_from_file() {
+        use super::{MetricsExporter, PrometheusConfig, PrometheusHistograms};
+
+        let cfg = parse(
+            r#"{"metrics":{"exporter":{"prometheus":{"bind":"0.0.0.0:9100","histograms":"summaries","idle_timeout_ms":300000}}}}"#,
+        )
+        .expect("the document parses");
+
+        let exporter = cfg.metrics.expect("metrics is set").exporter;
+        let want = PrometheusConfig {
+            bind: "0.0.0.0:9100".parse().expect("valid address"),
+            histograms: PrometheusHistograms::Summaries,
+            idle_timeout: Some(Duration::from_secs(300)),
+        };
+        assert!(
+            matches!(&exporter, MetricsExporter::Prometheus(got) if *got == want),
+            "{exporter:?}"
+        );
     }
 
     // @lat: [[tests#Config files#Unknown field is rejected]]

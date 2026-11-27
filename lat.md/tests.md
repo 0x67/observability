@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -196,6 +196,18 @@ The log chain with `queue_size` 4, `max_batch_size` 1, and the first export stal
 
 A provider with resource `service.name=res-probe` passes it through both wrappers: after a flush, the test exporter's last `set_resource` call holds `service.name` `res-probe`.
 
+## Prometheus recorder
+
+A Prometheus scrape shows the configured histogram format, labels, and idle expiry.
+
+### Scrape shows buckets service label and expiry
+
+`init_metrics` on a free port with a 300 ms idle timeout and service `scrape-test` records a histogram, a counter, and a gauge.
+
+The first scrape has a `req_seconds_bucket` line with `le="0.25"`, the counter, and `service_name="scrape-test"` on every series line.
+
+One second later the second scrape has no `hits` counter and still has the `limit` gauge. The wait is real time, because the exporter's idle check reads the wall clock.
+
 ## Trace context propagation
 
 The string API carries W3C trace context in and out of a span without any `opentelemetry` type. The tests share one pipeline per process with `sample_ratio` 0.
@@ -236,6 +248,10 @@ An `otlp.tls` table with `roots = "webpki"`, a `ca_file`, and a `client_cert` gi
 ### Logging otlp batch defaults to one second delay when omitted
 
 `{"pipeline":{"logging":{"sinks":[]}}}` gives `otlp_batch.delay` of 1 s, `LoggingConfig`'s default, not the 5 s of `ExportBatch::default()`.
+
+### Prometheus settings parse from file
+
+A `metrics.exporter.prometheus` table with `bind`, `histograms = "summaries"`, and `idle_timeout_ms` 300000 parses into the matching `PrometheusConfig`, the idle timeout as 300 s.
 
 ### Unknown field is rejected
 

@@ -36,7 +36,8 @@ crate prints nothing to stderr.
 
 Installs the `metrics`-facade global recorder chosen by `MetricsExporter`:
 
-- `Prometheus { bind }`: a pull endpoint on the given socket.
+- `Prometheus(PrometheusConfig)`: a pull endpoint, by default on `127.0.0.1:9000` with bucketed
+  histograms and a `service_name` label on every series.
 - `Otlp`: an OTLP push bridge over the shared `OtlpConfig`.
 
 The `observability-core` gate flips true only on a successful install; any error path returns

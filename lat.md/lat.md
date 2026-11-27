@@ -22,6 +22,8 @@ Each layer in the registry has a filter. One unfiltered layer would leave the re
 
 [[crates/observability/src/metrics/mod.rs#init_metrics]] installs the `metrics`-facade global recorder (Prometheus pull or OTLP push) and flips the `observability-core` gate on success only; any error path leaves the gate untouched. It runs independently of the pipeline: `init` calls `init_pipeline` first (so a metrics failure is itself logged), and a metrics install failure downgrades to a `tracing::warn!` plus `metrics: None`, never taking down logging or tracing.
 
+The Prometheus recorder takes a [[crates/observability/src/config.rs#PrometheusConfig]]: a listen address (`127.0.0.1:9000` by default), bucketed histograms with the Prometheus client default seconds buckets (or quantile summaries), and an optional idle timeout. Every series gets a `service_name` label with the service name `init_metrics` receives, the Prometheus spelling of `service.name`. The idle timeout drops counter and histogram series not updated for that long and keeps gauges, so a gauge set once stays. The exporter builds with only its `http-listener` feature, which leaves out the push-gateway client and its `aws-lc-rs` provider.
+
 The subsystems are coupled at runtime in two places. One is the `OtlpConfig` value `init` clones out of `PipelineConfig` before calling `init_pipeline`, then hands to `init_metrics` alongside the service name. The other is the export runtime, which both get from `ExportRuntime::shared`.
 
 ## Config surface
@@ -100,7 +102,7 @@ A span's OTel context starts when it is first entered or its headers are read, a
 
 `otel` is the grouping feature. Per-signal features layer on top of it.
 
-`otel` pulls in `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp`/`tracing-opentelemetry`, plus `tokio` and `reqwest` for the export runtime, and gates every `#[cfg(feature = "otel")]` block. `tls` (default) adds rustls with ring for tonic and reqwest and the OS store check; `tls-webpki-roots` adds the bundled Mozilla roots; `tls-platform-verifier` adds `rustls-platform-verifier`. `otel-traces` is a plain alias for `otel`. `otel-logs` adds the OTLP log bridge (`opentelemetry-appender-tracing`). `metrics-prom` adds the Prometheus pull exporter. `metrics-otel` adds the OTLP metrics bridge and implies `otel`. `bunyan` adds the bunyan-format log sink. `serde` adds `Deserialize` to the config types.
+`otel` pulls in `opentelemetry`/`opentelemetry_sdk`/`opentelemetry-otlp`/`tracing-opentelemetry`, plus `tokio` and `reqwest` for the export runtime, and gates every `#[cfg(feature = "otel")]` block. `tls` (default) adds rustls with ring for tonic and reqwest and the OS store check; `tls-webpki-roots` adds the bundled Mozilla roots; `tls-platform-verifier` adds `rustls-platform-verifier`. `otel-traces` is a plain alias for `otel`. `otel-logs` adds the OTLP log bridge (`opentelemetry-appender-tracing`). `metrics-prom` adds the Prometheus pull exporter and `metrics-util` for its `MetricKindMask`. `metrics-otel` adds the OTLP metrics bridge and implies `otel`. `bunyan` adds the bunyan-format log sink. `serde` adds `Deserialize` to the config types.
 
 No feature is named `tracing` or `metrics`; those names stay reserved for the extern facade crate deps themselves, so a feature flag never shadows `tracing::` or `metrics::` path resolution.
 
