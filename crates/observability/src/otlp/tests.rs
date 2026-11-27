@@ -139,6 +139,91 @@ fn at_sign_outside_authority_is_not_a_credential() {
     }
 }
 
+// @lat: [[tests#OTLP endpoint scheme#Endpoint without scheme is rejected on both protocols]]
+#[cfg(feature = "otel")]
+#[test]
+fn endpoint_without_scheme_is_rejected_on_both_protocols() {
+    use std::sync::PoisonError;
+
+    use super::{ExportRuntime, runtime::tests::SLOT_LOCK};
+    use crate::error::OtlpError;
+
+    let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+    for (protocol, endpoint) in [
+        (OtlpProtocol::Grpc, "collector.example:4317"),
+        (OtlpProtocol::HttpProtobuf, "collector.example:4318"),
+        (OtlpProtocol::Grpc, "unix:///tmp/otel.sock"),
+    ] {
+        let err = exporter_config(protocol, endpoint)
+            .span_exporter(&runtime)
+            .err();
+
+        let Some(OtlpError::EndpointScheme { endpoint: named }) = &err else {
+            panic!("{protocol:?} {endpoint}: {err:?}");
+        };
+        assert_eq!(named, endpoint);
+    }
+
+    // the scheme is compared without case
+    let cfg = exporter_config(OtlpProtocol::HttpProtobuf, "HTTP://127.0.0.1:4318");
+    if let Err(e) = cfg.span_exporter(&runtime) {
+        panic!("HTTP:// endpoint: {e}");
+    }
+}
+
+// @lat: [[tests#OTLP endpoint scheme#Exporter follows configured protocol over env]]
+#[cfg(feature = "otel")]
+#[test]
+fn exporter_follows_configured_protocol_over_env() {
+    use std::sync::PoisonError;
+
+    use super::{ExportRuntime, runtime::tests::SLOT_LOCK};
+
+    let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+    for (var, value, protocol, endpoint) in [
+        (
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            "grpc",
+            OtlpProtocol::HttpProtobuf,
+            "http://127.0.0.1:4318",
+        ),
+        (
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+            "grpc",
+            OtlpProtocol::HttpProtobuf,
+            "http://127.0.0.1:4318",
+        ),
+        (
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            "http/protobuf",
+            OtlpProtocol::Grpc,
+            "http://127.0.0.1:4317",
+        ),
+    ] {
+        let previous = std::env::var_os(var);
+        // SAFETY: SLOT_LOCK serializes this with every exporter build in the otlp tests, and
+        // nextest runs each test in its own process, so no other thread reads the environment.
+        unsafe { std::env::set_var(var, value) };
+
+        let built = exporter_config(protocol, endpoint).span_exporter(&runtime);
+
+        // SAFETY: SLOT_LOCK is still held; put back what the test process started with.
+        unsafe {
+            match previous {
+                Some(previous) => std::env::set_var(var, previous),
+                None => std::env::remove_var(var),
+            }
+        }
+        if let Err(e) = built {
+            panic!("{var}={value} with {protocol:?}: {e}");
+        }
+    }
+}
+
 // needs an OS certificate store with at least one root, as on every CI image
 #[cfg(feature = "tls")]
 #[test]

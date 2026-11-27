@@ -21,7 +21,7 @@ use std::{collections::BTreeMap, fmt, time::Duration};
 use opentelemetry::KeyValue;
 #[cfg(feature = "otel")]
 use opentelemetry_otlp::{
-    WithExportConfig, WithHttpConfig, WithTonicConfig, tonic_types::metadata::MetadataMap,
+    Protocol, WithExportConfig, WithHttpConfig, WithTonicConfig, tonic_types::metadata::MetadataMap,
 };
 
 #[cfg(feature = "otel")]
@@ -187,12 +187,15 @@ impl OtlpConfig {
         B: WithExportConfig + WithTonicConfig,
     {
         self.check_endpoint()?;
+        self.check_scheme()?;
 
         // connect_lazy spawns the channel worker onto the runtime current at build time,
         // whether opentelemetry-otlp builds the channel or `platform_channel` does
         let _entered = runtime.handle().enter();
 
+        // set in code, so an OTEL_EXPORTER_OTLP_PROTOCOL meant for other services is ignored
         let builder = builder
+            .with_protocol(Protocol::Grpc)
             .with_endpoint(&self.endpoint)
             .with_timeout(self.timeout)
             .with_metadata(MetadataMap::from_headers(self.header_map()?));
@@ -209,12 +212,15 @@ impl OtlpConfig {
         path: &str,
     ) -> Result<B, OtlpError> {
         self.check_endpoint()?;
+        self.check_scheme()?;
 
         // opentelemetry-otlp drops an invalid header without a word, so reject it here
         self.header_map()?;
         let client = RuntimeHttpClient::new(self.reqwest_client()?, runtime.handle().clone());
 
+        // set in code, so an OTEL_EXPORTER_OTLP_PROTOCOL meant for other services is ignored
         Ok(builder
+            .with_protocol(Protocol::HttpBinary)
             .with_http_client(client)
             .with_endpoint(self.signal_url(path))
             .with_timeout(self.timeout)
@@ -228,6 +234,19 @@ impl OtlpConfig {
             return Err(OtlpError::EndpointCredentials);
         }
         Ok(())
+    }
+
+    /// Rejects an endpoint without `http://` or `https://`. opentelemetry-otlp can turn a
+    /// scheme-less gRPC endpoint into `https://` with no trusted roots, and `is_https` would
+    /// skip the crate's TLS setup for it. Runs after `check_endpoint`, since the error prints
+    /// the endpoint.
+    fn check_scheme(&self) -> Result<(), OtlpError> {
+        if self.has_scheme("http://") || self.has_scheme("https://") {
+            return Ok(());
+        }
+        Err(OtlpError::EndpointScheme {
+            endpoint: self.endpoint.clone(),
+        })
     }
 
     // opentelemetry-otlp sends to a programmatic HTTP endpoint as given, with no signal path
@@ -296,9 +315,14 @@ impl OtlpConfig {
     }
 
     fn is_https(&self) -> bool {
+        self.has_scheme("https://")
+    }
+
+    /// True when `endpoint` starts with `scheme`, compared without case.
+    fn has_scheme(&self, scheme: &str) -> bool {
         self.endpoint
-            .get(..8)
-            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
     }
 
     /// Validated headers. The error names the header and never carries its value.

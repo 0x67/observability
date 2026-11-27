@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the metrics recorder guard, the OTLP config debug output, OTLP endpoint credentials, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the metrics recorder guard, the OTLP config debug output, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -286,6 +286,20 @@ Each config also has a header that the next check rejects, so only a credential 
 ### At sign outside authority is not a credential
 
 An `@` in the path or query (`http://collector:4318/v1/traces?x=a@b`, `http://collector:4318/users/a@b/traces`) is not a credential, and neither is an endpoint without one (`collector:4317`).
+
+## OTLP endpoint scheme
+
+Exporter setup accepts only `http://` and `https://` endpoints and pins the transport to `OtlpConfig::protocol`, whatever the OTLP protocol variables say.
+
+### Endpoint without scheme is rejected on both protocols
+
+`collector.example:4317` and `unix:///tmp/otel.sock` over gRPC and `collector.example:4318` over HTTP return `OtlpError::EndpointScheme` with that endpoint in its `endpoint` field.
+
+`HTTP://127.0.0.1:4318` over HTTP builds, because the scheme is compared without case.
+
+### Exporter follows configured protocol over env
+
+An HTTP exporter builds with `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` or `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=grpc` set, and a gRPC exporter builds with `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` set. Each variable is restored after its build.
 
 ## OTLP layer filters
 

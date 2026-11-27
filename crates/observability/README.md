@@ -105,6 +105,11 @@ An endpoint with a user name or password, such as `https://user:pass@collector:4
 `OtlpError::EndpointCredentials` at init before any other OTLP check, and the error leaves the
 endpoint out. Send credentials in `headers`.
 
+`endpoint` must start with `http://` or `https://`, in any case. Any other endpoint, including
+`collector:4317` and `unix://` paths, returns `OtlpError::EndpointScheme` with the endpoint at
+init. Each exporter uses the transport `protocol` names and ignores
+`OTEL_EXPORTER_OTLP_PROTOCOL` and `OTEL_EXPORTER_OTLP_<SIGNAL>_PROTOCOL`.
+
 ### TLS
 
 TLS applies only to `https://` endpoints; `http://localhost` stays plain text. `OtlpConfig::tls`
@@ -261,6 +266,7 @@ pub enum OtlpError {
     InvalidPem { path: PathBuf, source: Box<dyn Error + Send + Sync> },
     PlatformVerifier(Box<dyn Error + Send + Sync>),
     EndpointCredentials,                                  // a user or password in `endpoint`
+    EndpointScheme { endpoint: String },                  // no `http://` or `https://` prefix
     InvalidHeader { name: String },
     Build(Box<dyn Error + Send + Sync>),                  // the exporter or HTTP client did not build
 }
