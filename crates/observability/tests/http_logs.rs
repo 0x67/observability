@@ -34,6 +34,7 @@ fn log_bridge_drops_exporter_thread_events() {
                 level: Some("info".to_owned()),
                 ..Default::default()
             }],
+            ..Default::default()
         }),
         tracing: None,
     };

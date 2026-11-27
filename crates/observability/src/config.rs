@@ -42,18 +42,27 @@ impl Default for PipelineConfig {
     }
 }
 
-/// Log fan-out across N sinks. The default is one stdout JSON sink.
+/// Log fan-out across N sinks, at most one of them `LogSinkKind::Otlp`. The default is one
+/// stdout JSON sink.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct LoggingConfig {
     pub sinks: Vec<LogSink>,
+    /// Batching and queue bound of the `LogSinkKind::Otlp` sink. The default exports a
+    /// partial batch after 1 s, the SDK log default; a partial table in a config file takes
+    /// the rest from `ExportBatch::default()`, whose delay is 5 s.
+    pub otlp_batch: ExportBatch,
 }
 
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             sinks: vec![LogSink::default()],
+            otlp_batch: ExportBatch {
+                delay: Duration::from_secs(1),
+                ..ExportBatch::default()
+            },
         }
     }
 }
@@ -317,6 +326,15 @@ mod tests {
             parse(r#"{"pipeline":{"otlp":{"tls":{"client_cert":{"cert_file":"c.pem"}}}}}"#);
         let err = no_key.err().expect("a client_cert without key_file fails");
         assert!(err.to_string().contains("`key_file`"), "{err}");
+    }
+
+    // @lat: [[tests#Config files#Logging otlp batch defaults to one second delay when omitted]]
+    #[test]
+    fn logging_otlp_batch_defaults_to_one_second_delay_when_omitted() {
+        let cfg = parse(r#"{"pipeline":{"logging":{"sinks":[]}}}"#).expect("the document parses");
+
+        let logging = cfg.pipeline.logging.expect("logging is set");
+        assert_eq!(logging.otlp_batch.delay, Duration::from_secs(1));
     }
 
     // @lat: [[tests#Config files#Unknown field is rejected]]

@@ -26,6 +26,8 @@ pub enum PipelineError {
     },
     #[error("trace sample ratio {0} is outside 0.0..=1.0")]
     SampleRatio(f64),
+    #[error("at most one LogSinkKind::Otlp sink is allowed")]
+    DuplicateOtlpLogSink,
 }
 
 /// Why [`crate::propagation::set_parent_from_headers`] could not set a span's parent.

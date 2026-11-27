@@ -4,18 +4,22 @@ use opentelemetry::trace::TracerProvider as _;
 #[cfg(feature = "otel-logs")]
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 #[cfg(feature = "otel-logs")]
-use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
 use opentelemetry_sdk::trace::{BatchSpanProcessor, Sampler, SdkTracerProvider};
 use tracing_subscriber::Layer;
 
+#[cfg(feature = "otel-logs")]
+use super::bounded::{BoundedLogProcessor, bounded_log_chain};
 use super::{
     BoxedLayer,
     bounded::{BoundedSpanProcessor, bounded_span_chain},
     dropped::DropCounters,
     filter::otlp_filter,
 };
+#[cfg(feature = "otel-logs")]
+use crate::config::ExportBatch;
 use crate::{
-    config::{LogSink, LogSinkKind, PipelineConfig, TracingConfig},
+    config::{LogSinkKind, PipelineConfig, TracingConfig},
     error::{OtlpError, PipelineError, Signal},
     otlp::{ExportRuntime, OtlpConfig},
 };
@@ -48,26 +52,31 @@ impl OtelProviders {
     }
 }
 
-/// Push the OTel span layer and one OTLP log bridge per OTLP log sink onto `layers`, and
-/// return the providers behind them. `None` when the config asks for no OTLP signal.
+/// Push the OTel span layer and the OTLP log bridge onto `layers`, and return the providers
+/// behind them. `None` when the config asks for no OTLP signal.
 pub(super) fn otel_layers(
     cfg: &PipelineConfig,
-    sinks: &[LogSink],
     layers: &mut Vec<BoxedLayer>,
     dropped: &DropCounters,
 ) -> Result<Option<OtelProviders>, PipelineError> {
-    let log_levels: Vec<&str> = sinks
-        .iter()
-        .filter(|sink| matches!(sink.kind, LogSinkKind::Otlp))
-        .map(|sink| sink.level.as_deref().unwrap_or(&cfg.level))
-        .collect();
-    let first = match (&cfg.tracing, log_levels.is_empty()) {
+    // the level and batch of the one OTLP log sink; `build_layers` rejected a second one
+    let otlp_log = cfg.logging.as_ref().and_then(|logging| {
+        logging
+            .sinks
+            .iter()
+            .find(|sink| matches!(sink.kind, LogSinkKind::Otlp))
+            .map(|sink| {
+                let level = sink.level.as_deref().unwrap_or(&cfg.level);
+                (level, &logging.otlp_batch)
+            })
+    });
+    let first = match (&cfg.tracing, otlp_log) {
         (Some(_), _) => Signal::Traces,
-        (None, false) => Signal::Logs,
-        (None, true) => return Ok(None),
+        (None, Some(_)) => Signal::Logs,
+        (None, None) => return Ok(None),
     };
     #[cfg(not(feature = "otel-logs"))]
-    if !log_levels.is_empty() {
+    if otlp_log.is_some() {
         return Err(PipelineError::FeatureDisabled {
             feature: "otel-logs",
         });
@@ -101,22 +110,19 @@ pub(super) fn otel_layers(
         None => None,
     };
 
-    // one provider serves every OTLP log sink; each sink keeps its own level
     #[cfg(feature = "otel-logs")]
-    let logger = if log_levels.is_empty() {
-        None
-    } else {
-        let provider =
-            build_logger_provider(&inputs).map_err(|source| PipelineError::Exporter {
-                signal: Signal::Logs,
-                source,
+    let logger = match otlp_log {
+        Some((level, batch)) => {
+            let provider = build_logger_provider(&inputs, batch).map_err(|source| {
+                PipelineError::Exporter {
+                    signal: Signal::Logs,
+                    source,
+                }
             })?;
-        layers.extend(
-            log_levels
-                .iter()
-                .map(|level| log_bridge_layer(&provider, level)),
-        );
-        Some(provider)
+            layers.push(log_bridge_layer(&provider, level));
+            Some(provider)
+        }
+        None => None,
     };
 
     Ok(Some(OtelProviders {
@@ -179,11 +185,23 @@ fn build_tracer_provider(
     Ok(builder.build())
 }
 
+/// The bounded log chain over the OTLP log exporter.
 #[cfg(feature = "otel-logs")]
-fn build_logger_provider(inputs: &ProviderInputs<'_>) -> Result<SdkLoggerProvider, OtlpError> {
+fn bounded_log_processor(
+    inputs: &ProviderInputs<'_>,
+    batch: &ExportBatch,
+) -> Result<BoundedLogProcessor<BatchLogProcessor>, OtlpError> {
     let exporter = inputs.otlp.log_exporter(inputs.runtime)?;
+    Ok(bounded_log_chain(exporter, batch, inputs.dropped))
+}
+
+#[cfg(feature = "otel-logs")]
+fn build_logger_provider(
+    inputs: &ProviderInputs<'_>,
+    batch: &ExportBatch,
+) -> Result<SdkLoggerProvider, OtlpError> {
     Ok(SdkLoggerProvider::builder()
-        .with_batch_exporter(exporter)
+        .with_log_processor(bounded_log_processor(inputs, batch)?)
         .with_resource(inputs.otlp.otel_resource(inputs.service))
         .build())
 }

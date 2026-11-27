@@ -6,6 +6,8 @@
 //! passed on until its export returns, which is never less than what sits in the SDK
 //! channel of the same capacity, so the SDK never finds its channel full.
 
+#[cfg(feature = "otel-logs")]
+mod logs;
 mod traces;
 
 #[cfg(test)]
@@ -19,6 +21,8 @@ use std::{
     },
 };
 
+#[cfg(feature = "otel-logs")]
+pub(in crate::pipeline) use self::logs::{BoundedLogProcessor, bounded_log_chain};
 pub(in crate::pipeline) use self::traces::{BoundedSpanProcessor, bounded_span_chain};
 
 /// Items a bounded processor accepted whose export has not finished.

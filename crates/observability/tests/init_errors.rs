@@ -28,6 +28,7 @@ fn one_sink(kind: LogSinkKind, format: LogFormat) -> Option<LoggingConfig> {
             level: None,
             ..Default::default()
         }],
+        ..Default::default()
     })
 }
 
@@ -103,6 +104,29 @@ fn otlp_log_sink_without_otel_logs_returns_feature_disabled() {
                 feature: "otel-logs"
             }
         ),
+        "{err:?}"
+    );
+}
+
+// @lat: [[tests#Init contract#Two OTLP log sinks return duplicate error]]
+#[test]
+fn two_otlp_log_sinks_return_duplicate_error() {
+    let otlp_sink = || LogSink {
+        kind: LogSinkKind::Otlp,
+        ..Default::default()
+    };
+
+    // `otlp` is unset, so a check that ran after the provider setup would fail on it first
+    let err = init_error(PipelineConfig {
+        logging: Some(LoggingConfig {
+            sinks: vec![otlp_sink(), otlp_sink()],
+            ..Default::default()
+        }),
+        ..config()
+    });
+
+    assert!(
+        matches!(err, PipelineError::DuplicateOtlpLogSink),
         "{err:?}"
     );
 }
