@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, export retry, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, init end to end, the rolling file sink, OTLP headers, OTLP signal paths, export retry, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -400,6 +400,24 @@ Tracing over HTTP to `http://exa mple:4318` returns `PipelineError::Exporter` wi
 ### Endpoint with credentials returns exporter error without the secret
 
 Tracing over HTTP to `http://user:s3cret@127.0.0.1:1` returns `PipelineError::Exporter` with `Signal::Traces` and an `OtlpError::EndpointCredentials` source. Neither the error's `Debug` nor any `Display` in its source chain contains `s3cret`.
+
+## Init end to end
+
+`init_pipeline` and `init_metrics` run through the public API, one global install per test binary, with the mock collector where a test exports.
+
+### Span reaches mock collector with resource
+
+An HTTP/protobuf pipeline with service `compat-probe` and resource `deployment.environment=compat-ci` exports `info_span!("export-probe")` with no app runtime.
+
+After the guard drops, the mock holds a `POST /v1/traces` whose payload names the span, both resource keys, and both values.
+
+### Second init pipeline returns already init
+
+With `logging`, `tracing`, and `otlp` all `None`, a first `init_pipeline` succeeds and a second one in the same process returns `PipelineError::AlreadyInit`, not a panic.
+
+### Unbindable Prometheus address maps to Bind and leaves gate off
+
+`init_metrics` with a Prometheus listener on `192.0.2.1:0` (TEST-NET-1, which no CI host owns) returns `MetricsError::Bind`, and `metrics_enabled()` is still `false` afterwards.
 
 ## Rolling file sink
 
