@@ -1,5 +1,6 @@
 use tracing_appender::non_blocking::WorkerGuard;
 
+use super::dropped::{DropCounters, Dropped};
 #[cfg(feature = "otel")]
 use super::otel::OtelProviders;
 
@@ -32,8 +33,17 @@ use super::otel::OtelProviders;
 pub struct PipelineGuard {
     // held only so the non-blocking writer threads flush their tail on drop
     pub(super) _workers: Vec<WorkerGuard>,
+    pub(super) dropped: DropCounters,
     #[cfg(feature = "otel")]
     pub(super) otel: Option<OtelProviders>,
+}
+
+impl PipelineGuard {
+    /// Spans and log records lost since init: a full queue, a failed export, or a full log
+    /// line buffer. Readable without a metrics recorder.
+    pub fn dropped(&self) -> Dropped {
+        self.dropped.snapshot()
+    }
 }
 
 impl Drop for PipelineGuard {

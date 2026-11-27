@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue and drop counters, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -153,6 +153,26 @@ With pipeline level `info`, a stdout sink at `info`, and `TracingConfig::level` 
 ### Zero ratio exports no root spans
 
 With `sample_ratio` 0 the HTTP mock never receives the root span `root-span`. A span whose parent is a sampled remote span context arrives, so spans do reach the mock under this sampler.
+
+## Writer sink queue
+
+A stdout or rolling-file sink buffers at most its `LineQueue::lines`. These tests write 10 lines into a one-line queue whose output blocks until the test opens a gate.
+
+### Drop overflow counts lost lines
+
+With `Overflow::Drop`, the delivered lines plus `Dropped::logs` come to exactly 10 once the gate opens and the worker guard drops, and at least 8 lines are counted as lost.
+
+### Block overflow delivers every line
+
+With `Overflow::Block`, a second thread writes the 10 lines and waits on the full queue until the gate opens. All 10 arrive in order, and `Dropped::logs` stays 0.
+
+## Drop counters
+
+`DropCounters` keeps one pipeline's per-signal totals and mirrors each drop into the `observability.dropped` counter.
+
+### Add updates totals and metric
+
+Under a `DebuggingRecorder` set with `metrics::with_local_recorder`, adding 2 and then 1 dropped log lines gives `Dropped { traces: 0, logs: 3 }` and one `observability.dropped` counter at 3 labeled `signal="logs"` and `reason="buffer_full"`.
 
 ## Trace context propagation
 

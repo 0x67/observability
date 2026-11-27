@@ -70,6 +70,16 @@ TLS applies only to `https://` endpoints, so `http://localhost` stays plain text
 
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.
 
+## Bounded delivery and drop counters
+
+Every queue between the app and a sink has a fixed bound, and every item lost to a full queue is counted.
+
+Each stdout and rolling-file sink writes through [[crates/observability/src/pipeline/writer.rs#sink_writer]], a `tracing-appender` `NonBlocking` sized by the sink's `LineQueue`: 128,000 lines and `Overflow::Drop` by default, the `tracing-appender` defaults. `Overflow::Block` makes the logging thread wait for space instead, which loses nothing and stalls that thread on a slow disk.
+
+A lossy `NonBlocking` returns `Ok` for a dropped line and only bumps its `ErrorCounter`, and it has no callback. [[crates/observability/src/pipeline/writer.rs#CountingWriter]] therefore reads that counter after each write and reports any growth, so the write that lost a line reports it. The fast path is two relaxed loads per line.
+
+[[crates/observability/src/pipeline/dropped.rs#DropCounters]] holds one pipeline's totals per signal. `add` updates the total and increments the `observability.dropped` counter with `signal` and `reason` labels, which Prometheus writes as `observability_dropped`. A drop before a metrics recorder is installed reaches only the total. `PipelineGuard::dropped` returns the totals as a [[crates/observability/src/pipeline/dropped.rs#Dropped]], so a service without a recorder can read them too.
+
 ## Trace context propagation
 
 With tracing on, a successful [[crates/observability/src/pipeline/mod.rs#init_pipeline]] sets the W3C `TraceContextPropagator` as the process-wide OTel text map propagator, so OTel-aware HTTP and gRPC middleware works without setup.

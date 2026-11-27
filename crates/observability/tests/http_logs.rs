@@ -32,6 +32,7 @@ fn log_bridge_drops_exporter_thread_events() {
                 kind: LogSinkKind::Otlp,
                 format: LogFormat::Json,
                 level: Some("info".to_owned()),
+                ..Default::default()
             }],
         }),
         tracing: None,

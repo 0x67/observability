@@ -35,6 +35,7 @@ fn one_endpoint_sends_each_signal_to_its_path() {
                     kind: LogSinkKind::Otlp,
                     format: LogFormat::Json,
                     level: None,
+                    ..Default::default()
                 }],
             }),
             tracing: Some(TracingConfig::default()),

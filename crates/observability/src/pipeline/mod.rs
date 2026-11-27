@@ -13,7 +13,11 @@ use tracing_subscriber::{Layer, Registry, layer::SubscriberExt, util::Subscriber
 use self::otel::otel_layers;
 #[cfg(feature = "bunyan")]
 use self::sinks::bunyan_storage_layer;
-use self::sinks::{log_layer, rolling_appender};
+use self::{
+    dropped::DropCounters,
+    sinks::{log_layer, rolling_appender},
+    writer::sink_writer,
+};
 #[cfg(not(feature = "otel"))]
 use crate::config::LogSink;
 use crate::{
@@ -21,12 +25,15 @@ use crate::{
     error::PipelineError,
 };
 
+mod dropped;
 mod filter;
 mod guard;
 #[cfg(feature = "otel")]
 mod otel;
 mod sinks;
+mod writer;
 
+pub use dropped::Dropped;
 pub use guard::PipelineGuard;
 
 type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync>;
@@ -82,6 +89,7 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
         .map_or(&[][..], |logging| logging.sinks.as_slice());
     let mut layers: Vec<BoxedLayer> = Vec::new();
     let mut workers = Vec::new();
+    let dropped = DropCounters::default();
 
     // bunyan needs one JsonStorageLayer in the registry, added once ahead of any bunyan sink.
     #[cfg(feature = "bunyan")]
@@ -89,15 +97,17 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
 
     for sink in sinks {
         let (writer, worker) = match &sink.kind {
-            LogSinkKind::Stdout => tracing_appender::non_blocking(std::io::stdout()),
+            LogSinkKind::Stdout => sink_writer(std::io::stdout(), sink.queue, &dropped),
             LogSinkKind::RollingFile {
                 dir,
                 prefix,
                 rotation,
                 max_files,
-            } => tracing_appender::non_blocking(rolling_appender(
-                dir, prefix, *rotation, *max_files,
-            )?),
+            } => sink_writer(
+                rolling_appender(dir, prefix, *rotation, *max_files)?,
+                sink.queue,
+                &dropped,
+            ),
             // the OTLP log bridge is built with the other OTel layers below
             LogSinkKind::Otlp => continue,
         };
@@ -113,6 +123,7 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
 
     let guard = PipelineGuard {
         _workers: workers,
+        dropped,
         #[cfg(feature = "otel")]
         otel,
     };

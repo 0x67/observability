@@ -26,6 +26,7 @@ fn one_sink(kind: LogSinkKind, format: LogFormat) -> Option<LoggingConfig> {
             kind,
             format,
             level: None,
+            ..Default::default()
         }],
     })
 }

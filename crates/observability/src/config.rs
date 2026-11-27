@@ -63,8 +63,47 @@ impl Default for LoggingConfig {
 #[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
 pub struct LogSink {
     pub kind: LogSinkKind,
+    /// Line format of a stdout or rolling-file sink.
     pub format: LogFormat,
     pub level: Option<String>,
+    /// Line queue of a stdout or rolling-file sink.
+    pub queue: LineQueue,
+}
+
+/// Lines a stdout or rolling-file sink buffers before its writer thread takes them, and
+/// what a full buffer does. The default is 128,000 lines and [`Overflow::Drop`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default, deny_unknown_fields))]
+pub struct LineQueue {
+    pub lines: NonZeroUsize,
+    pub overflow: Overflow,
+}
+
+impl Default for LineQueue {
+    fn default() -> Self {
+        Self {
+            lines: DEFAULT_QUEUE_LINES,
+            overflow: Overflow::Drop,
+        }
+    }
+}
+
+// tracing-appender's own default; the unwrap runs at compile time
+const DEFAULT_QUEUE_LINES: NonZeroUsize =
+    NonZeroUsize::new(tracing_appender::non_blocking::DEFAULT_BUFFERED_LINES_LIMIT).unwrap();
+
+/// What a writer sink does with a line when its queue is full.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum Overflow {
+    /// Drop the line and count it in `PipelineGuard::dropped` and `observability.dropped`.
+    #[default]
+    Drop,
+    /// Block the logging thread until the writer catches up, so no line is lost. Never use
+    /// it on a latency-sensitive thread: a slow disk or stdout then stalls that thread.
+    Block,
 }
 
 /// Sink destination.
