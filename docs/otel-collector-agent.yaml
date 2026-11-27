@@ -1,0 +1,46 @@
+# A collector agent next to the service: it keeps the export queue and the log file offsets on
+# disk, so queued data survives a backend outage and an agent restart.
+# Send logs one way: the OTLP log sink, or a rolling-file sink that filelog reads. With both,
+# every line arrives twice.
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol/file_storage
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+  # the rolling-file sink's `dir` and `prefix`; its files are named `<prefix>.<date>`
+  filelog:
+    include: [/var/log/my-service/app*]
+    # read what the sink wrote before the agent's first start; after that the stored offsets apply
+    start_at: beginning
+    storage: file_storage
+    operators:
+      - type: json_parser
+
+exporters:
+  otlp:
+    endpoint: backend.example.com:4317
+    sending_queue:
+      enabled: true
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlp]
+      exporters: [otlp]
+    logs:
+      receivers: [otlp, filelog]
+      exporters: [otlp]
