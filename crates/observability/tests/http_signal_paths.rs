@@ -19,7 +19,7 @@ const SERVICE: &str = "signal-paths-probe";
 fn one_endpoint_sends_each_signal_to_its_path() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start(None);
+    let (base, collector) = http_collector::start(None, 0);
     let cfg = ObsConfig {
         pipeline: PipelineConfig {
             service_name: SERVICE.to_owned(),

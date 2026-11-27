@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, export retry, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -436,6 +436,18 @@ A header named `x api`, or `x-api-key` with value `k1` plus a newline, returns `
 One HTTP/protobuf `OtlpConfig` at the HTTP mock's base URL drives tracing, an OTLP log sink, and OTLP metrics through `init`.
 
 After one span, one `info!`, one counter, and the guard drop, the span arrived in a `POST /v1/traces`, the log record in a `POST /v1/logs`, and the counter in a `POST /v1/metrics`. Every traces request carries the configured `service.name`.
+
+## Export retry
+
+opentelemetry-otlp retries a transient export failure with its default policy within `OtlpConfig::timeout`. The mock collectors answer the first export with a failure, record every request, and accept the rest.
+
+### HTTP export retries after 503
+
+With the HTTP mock failing one request with 503 and a 5 s timeout, one span and a guard drop produce two `POST /v1/traces` requests, each carrying the span, so the batch was sent again and accepted.
+
+### gRPC export retries after Unavailable
+
+With the gRPC mock answering one export with `Unavailable` and a 5 s timeout, one span and a guard drop produce two trace exports, each carrying the span, so the batch was sent again and accepted.
 
 ## TLS export
 

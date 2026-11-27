@@ -17,7 +17,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 fn zero_ratio_exports_no_root_spans() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start(None);
+    let (base, collector) = http_collector::start(None, 0);
     let cfg = PipelineConfig {
         otlp: Some(OtlpConfig {
             endpoint: base,

@@ -17,7 +17,7 @@ use observability::{
 fn log_bridge_drops_exporter_thread_events() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start(None);
+    let (base, collector) = http_collector::start(None, 0);
     let cfg = PipelineConfig {
         service_name: "http-logs".to_owned(),
         level: "info".to_owned(),

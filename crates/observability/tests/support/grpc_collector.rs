@@ -35,8 +35,9 @@ pub struct GrpcCollector {
 
 /// Start the mock on its own runtime in a std thread and return its endpoint and a handle.
 /// With `tls`, it serves gRPC over TLS (`https://127.0.0.1:<port>`); without, plain gRPC
-/// (`http://127.0.0.1:<port>`). The calling thread gets no runtime.
-pub fn start(tls: Option<ServerTlsConfig>) -> (String, GrpcCollector) {
+/// (`http://127.0.0.1:<port>`). The calling thread gets no runtime. It answers the first
+/// `failures` exports with `Unavailable` and accepts every export after them.
+pub fn start(tls: Option<ServerTlsConfig>, failures: usize) -> (String, GrpcCollector) {
     let scheme = if tls.is_some() { "https" } else { "http" };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -54,7 +55,10 @@ pub fn start(tls: Option<ServerTlsConfig>) -> (String, GrpcCollector) {
     );
     let received = Arc::new(Mutex::new(String::new()));
 
-    let recorder = Recorder(Arc::clone(&received));
+    let recorder = Recorder {
+        received: Arc::clone(&received),
+        failures: Arc::new(Mutex::new(failures)),
+    };
     thread::spawn(move || {
         let mut server = Server::builder();
         if let Some(tls) = tls {
@@ -72,8 +76,9 @@ pub fn start(tls: Option<ServerTlsConfig>) -> (String, GrpcCollector) {
 }
 
 impl GrpcCollector {
-    /// Every export so far: its ASCII metadata as `key: value` lines, then the request in
-    /// `Debug` form, which spells out span names, log bodies, and metric names.
+    /// Every export so far, rejected ones included: its ASCII metadata as `key: value` lines,
+    /// then the request in `Debug` form, which spells out span names, log bodies, and
+    /// metric names.
     pub fn received_text(&self) -> String {
         self.received
             .lock()
@@ -83,10 +88,14 @@ impl GrpcCollector {
 }
 
 #[derive(Clone)]
-struct Recorder(Arc<Mutex<String>>);
+struct Recorder {
+    received: Arc<Mutex<String>>,
+    failures: Arc<Mutex<usize>>,
+}
 
 impl Recorder {
-    fn record<T: Debug>(&self, request: &Request<T>) {
+    /// Records the export, then answers `Unavailable` while failures are left.
+    fn record<T: Debug>(&self, request: &Request<T>) -> Result<(), Status> {
         let mut text = String::new();
         for entry in request.metadata().iter() {
             if let KeyAndValueRef::Ascii(key, value) = entry {
@@ -96,10 +105,17 @@ impl Recorder {
         }
         let _ = writeln!(text, "{:?}", request.get_ref());
 
-        self.0
+        self.received
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push_str(&text);
+
+        let mut left = self.failures.lock().unwrap_or_else(PoisonError::into_inner);
+        if *left > 0 {
+            *left -= 1;
+            return Err(Status::unavailable("mock collector is failing on purpose"));
+        }
+        Ok(())
     }
 }
 
@@ -109,7 +125,7 @@ impl TraceService for Recorder {
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
-        self.record(&request);
+        self.record(&request)?;
         Ok(Response::new(ExportTraceServiceResponse::default()))
     }
 }
@@ -120,7 +136,7 @@ impl LogsService for Recorder {
         &self,
         request: Request<ExportLogsServiceRequest>,
     ) -> Result<Response<ExportLogsServiceResponse>, Status> {
-        self.record(&request);
+        self.record(&request)?;
         Ok(Response::new(ExportLogsServiceResponse::default()))
     }
 }
@@ -131,7 +147,7 @@ impl MetricsService for Recorder {
         &self,
         request: Request<ExportMetricsServiceRequest>,
     ) -> Result<Response<ExportMetricsServiceResponse>, Status> {
-        self.record(&request);
+        self.record(&request)?;
         Ok(Response::new(ExportMetricsServiceResponse::default()))
     }
 }
