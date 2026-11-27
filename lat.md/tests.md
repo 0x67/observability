@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the OTLP metrics recorder, the metrics recorder guard, the OTLP config debug output, exporter debug log, OTLP endpoint credentials and scheme, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -296,6 +296,14 @@ Constructing a `MetricsGuard` flips the `observability-core` gate on; dropping t
 ### Debug prints header names and hides values
 
 Formatting an `OtlpConfig` that has header `("x-api-key", "s3cr3t-value")` shows the header name paired with `[REDACTED]`, never the value, and still shows endpoint, protocol, resource, and timeout.
+
+## Exporter debug log
+
+opentelemetry-otlp logs a `TonicChannelBuilt` debug event on the thread that builds a gRPC exporter. `init` builds the metric exporter after it installs the subscriber, on the app thread, so the exporter-thread filter does not drop that event.
+
+### gRPC exporter build logs header keys without values
+
+With `OTEL_EXPORTER_OTLP_HEADERS=x-api-key=sentinel-7c1f`, `init_metrics` over gRPC runs under a debug fmt subscriber that writes to a buffer. The buffer holds `TonicChannelBuilt` and `x-api-key`, and never `sentinel-7c1f`.
 
 ## OTLP endpoint credentials
 

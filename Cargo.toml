@@ -11,9 +11,9 @@ homepage = "https://github.com/0x67/observability"
 authors = ["0x67 <69191110+0x67@users.noreply.github.com>"]
 publish = false
 
-# Verified 0.31 otel matrix. metrics-exporter-otel 0.3.1 pins opentelemetry ^0.31,
-# and all three OTLP signals plus the metrics bridge must resolve to ONE opentelemetry
-# version, so the bridge gates the whole stack. Do not bump one otel crate alone.
+# The opentelemetry crates, tracing-opentelemetry, opentelemetry-http, and
+# opentelemetry-proto move as one family: every signal and the metrics recorder
+# must share one opentelemetry version.
 [workspace.dependencies]
 # hot-path core (observability-core)
 metrics = "0.24"
@@ -24,12 +24,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 tracing-appender = "0.2"
 tracing-bunyan-formatter = "0.3"
-# backend: opentelemetry 0.31
-tracing-opentelemetry = "0.32"
-opentelemetry = "0.31"
-opentelemetry_sdk = "0.31"
+# backend: opentelemetry 0.33
+tracing-opentelemetry = "0.34.0"
+opentelemetry = "0.33.1"
+opentelemetry_sdk = "0.33.1"
 # default features off: no reqwest-blocking-client, so HTTP export uses the crate's async client
-opentelemetry-otlp = { version = "0.31", default-features = false, features = [
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = [
   "grpc-tonic",
   "http-proto",
   "trace",
@@ -37,19 +37,21 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = [
   "logs",
   "internal-logs",
 ] }
-opentelemetry-http = { version = "0.31.0", default-features = false, features = ["reqwest"] }
-reqwest = { version = "0.12.28", default-features = false }
+opentelemetry-http = { version = "0.33.1", default-features = false, features = ["reqwest"] }
+reqwest = { version = "0.13.5", default-features = false }
 async-trait = "0.1.89"
 rustls-native-certs = "0.8.4"
 http = "1.4.2"
-# `tls-platform-verifier`: the OS verifier, plus the rustls and tonic APIs it plugs into
+# the HTTP client's rustls config and the test servers; aws-lc-rs is the only provider
+rustls = { version = "0.23.46", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+webpki-roots = "1.0.12"
+# `tls-platform-verifier`: the OS verifier, plus the tonic API it plugs into
 rustls-platform-verifier = "0.7.1"
 tonic = { version = "0.14.6", default-features = false, features = ["channel"] }
-opentelemetry-proto = { version = "0.31.0", default-features = false }
+opentelemetry-proto = { version = "0.33.1", default-features = false }
 # test-only: certificates generated at test time, so no key or expiring PEM is committed
-rcgen = "0.14.10"
-rustls = { version = "0.23.46", default-features = false, features = ["std", "ring"] }
-opentelemetry-appender-tracing = "0.31"
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "aws_lc_rs"] }
+opentelemetry-appender-tracing = "0.33.1"
 # backend: metrics exporters
 # only the listener: `push-gateway` pulls hyper-rustls with aws-lc-rs, which nothing here uses
 metrics-exporter-prometheus = { version = "0.17", default-features = false, features = [
