@@ -12,7 +12,7 @@ use observability::{OtlpConfig, PipelineConfig, TracingConfig, init_pipeline};
 fn default_otlp_config_exports_http_protobuf_to_base_url() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start(None);
+    let (base, collector) = http_collector::start(None, 0);
     let cfg = PipelineConfig {
         otlp: Some(OtlpConfig {
             endpoint: base,

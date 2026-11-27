@@ -32,8 +32,8 @@ fn export_without_client_cert_is_rejected() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
     let pki = test_pki::generate("no-client-cert");
-    let (grpc_endpoint, grpc) = grpc_collector::start(Some(pki.grpc_server_tls()));
-    let (http_base, http) = http_collector::start(Some(pki.http_server_tls()));
+    let (grpc_endpoint, grpc) = grpc_collector::start(Some(pki.grpc_server_tls()), 0);
+    let (http_base, http) = http_collector::start(Some(pki.http_server_tls()), 0);
     let without_cert = || OtlpTls {
         client_cert: None,
         ..pki.otlp_tls()

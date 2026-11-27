@@ -32,8 +32,8 @@ fn platform_verifier_with_extra_root_exports_on_both_transports() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
     let pki = test_pki::generate("platform");
-    let (grpc_endpoint, grpc) = grpc_collector::start(Some(pki.grpc_server_tls()));
-    let (http_base, http) = http_collector::start(Some(pki.http_server_tls()));
+    let (grpc_endpoint, grpc) = grpc_collector::start(Some(pki.grpc_server_tls()), 0);
+    let (http_base, http) = http_collector::start(Some(pki.http_server_tls()), 0);
     let platform = || OtlpTls {
         roots: TlsRoots::Platform,
         ..pki.otlp_tls()

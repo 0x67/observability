@@ -17,7 +17,7 @@ use observability::{
 fn obs_guard_drop_inside_current_thread_runtime_delivers_final_batch() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (endpoint, collector) = grpc_collector::start(None);
+    let (endpoint, collector) = grpc_collector::start(None, 0);
     let cfg = ObsConfig {
         pipeline: PipelineConfig {
             service_name: "drop-current-thread".to_owned(),

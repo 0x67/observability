@@ -11,7 +11,7 @@ use observability::{OtlpConfig, PipelineConfig, TracingConfig, init_pipeline};
 fn tracing_level_filters_exported_spans() {
     // SAFETY: the only test in this binary, and no other thread has started yet
     unsafe { std::env::remove_var("RUST_LOG") };
-    let (base, collector) = http_collector::start(None);
+    let (base, collector) = http_collector::start(None, 0);
     // the default stdout sink keeps the pipeline at info, so info spans are created
     let cfg = PipelineConfig {
         level: "info".to_owned(),
