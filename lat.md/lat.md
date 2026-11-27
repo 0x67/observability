@@ -70,6 +70,16 @@ TLS applies only to `https://` endpoints, so `http://localhost` stays plain text
 
 `otel_resource` folds `service.name` plus every configured `resource` attribute onto whichever provider calls it, so span, metric, and log all carry identical resource attributes from one config, with no per-signal drift.
 
+## Trace context propagation
+
+With tracing on, a successful [[crates/observability/src/pipeline/mod.rs#init_pipeline]] sets the W3C `TraceContextPropagator` as the process-wide OTel text map propagator, so OTel-aware HTTP and gRPC middleware works without setup.
+
+It replaces a propagator set before `init`, and one set after `init` wins. A failed init leaves the global alone.
+
+[[crates/observability/src/propagation.rs#trace_headers]] and [[crates/observability/src/propagation.rs#set_parent_from_headers]] carry `traceparent` and `tracestate` as plain string pairs, so no `opentelemetry` type reaches the public API. Header names match without regard to case. Without a valid `traceparent`, `set_parent_from_headers` returns `Ok` and leaves the span's local parent in place, because handing `set_parent` an empty context would make the span a root. Misuse maps `tracing-opentelemetry`'s `SetParentError` one to one onto [[crates/observability/src/error.rs#PropagationError]]: no OTel layer, span already started, span filtered out.
+
+A span's OTel context starts when it is first entered or its headers are read, and its parent is fixed from then on, so callers set the remote parent first.
+
 ## Feature model
 
 `otel` is the grouping feature. Per-signal features layer on top of it.
