@@ -25,52 +25,34 @@ on one git url check out two copies of the repository, and `observability-core` 
 one copy do not match the other.
 
 ```rust,no_run
-use std::time::Duration;
-use observability::{
-    init, ObsConfig, PipelineConfig, LoggingConfig, LogSink, LogSinkKind, LogFormat,
-    TracingConfig, MetricsConfig, MetricsExporter, OtlpConfig, OtlpProtocol, PrometheusConfig,
-};
+use observability::{MetricsConfig, ObsConfig, OtlpConfig, PipelineConfig, TracingConfig, init};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let otlp = OtlpConfig {
-        endpoint: "http://localhost:4317".into(),
-        protocol: OtlpProtocol::Grpc,
-        resource: [("deployment.environment".into(), "prod".into())].into(),
-        timeout: Duration::from_secs(5),
-        ..Default::default()
-    };
-
-    let cfg = ObsConfig {
+fn main() -> Result<(), observability::PipelineError> {
+    // Hold the guard for the whole process. Drop shuts the metrics recorder down,
+    // then exports the final OTLP batches and flushes the log writers.
+    let _guard = init(ObsConfig {
         pipeline: PipelineConfig {
             service_name: "feed-handler".into(),
-            level: "info".into(),
-            otlp: Some(otlp),
-            logging: Some(LoggingConfig {
-                sinks: vec![LogSink {
-                    kind: LogSinkKind::Stdout,
-                    format: LogFormat::Json,
-                    level: None,
-                    ..Default::default()
-                }],
+            otlp: Some(OtlpConfig {
+                endpoint: "http://collector:4318".into(),
                 ..Default::default()
             }),
             tracing: Some(TracingConfig::default()),
+            ..Default::default()
         },
-        metrics: Some(MetricsConfig {
-            exporter: MetricsExporter::Prometheus(PrometheusConfig {
-                bind: "0.0.0.0:9000".parse()?,
-                ..Default::default()
-            }),
-        }),
-    };
-
-    // Hold the guard for the whole process. Drop shuts the metrics recorder down,
-    // then exports the final OTLP batches and flushes the file writers.
-    let _guard = init(cfg)?;
+        metrics: Some(MetricsConfig::default()),
+    })?;
     tracing::info!("observability up");
     Ok(())
 }
 ```
+
+Each config type implements `Default`, and a setup sets only the fields that differ. This one
+logs JSON to stdout at `info`, exports spans over OTLP HTTP/protobuf, and serves Prometheus
+metrics on `127.0.0.1:9000`. `endpoint` is the collector base URL: HTTP export appends `/v1/traces`,
+`/v1/logs`, or `/v1/metrics`. With the `serde` feature the same config reads from a TOML, YAML,
+or JSON file; the [`observability` crate README](crates/observability#config-files) has the
+format.
 
 A plain `fn main()` is enough. OTLP export runs on the crate's own `observability-otlp`
 runtime, which means the app does not need a tokio runtime for export, and an app that runs

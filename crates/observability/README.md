@@ -82,6 +82,13 @@ resource attributes, timeout, and TLS for every OTLP signal. It builds three sib
 `service.name` plus every configured `resource` pair onto whichever provider calls it, so span,
 metric, and log all carry identical resource attributes with no per-signal drift.
 
+`endpoint` is the collector base URL. HTTP export drops one trailing `/` and appends the
+signal's path, so `http://collector:4318` sends spans to `/v1/traces`, log records to
+`/v1/logs`, and metrics to `/v1/metrics`. gRPC uses the endpoint as given, because the service
+path is part of each gRPC method. An HTTP endpoint that already ends in a signal path posts to
+`/v1/traces/v1/traces`; set the base URL instead. `OtlpConfig::default()` is HTTP/protobuf to
+`http://localhost:4318` with a 10 s timeout.
+
 The span, metric, and log exporters run their I/O on one tokio runtime the crate owns, with one
 worker and threads named `observability-otlp`. gRPC exporters are built inside it, and HTTP exporters send through an
 async `reqwest` client whose requests are spawned onto it. The app does not need a tokio runtime
@@ -168,6 +175,8 @@ pub enum PipelineError {
     FeatureDisabled { feature: &'static str },            // config needs a cargo feature the build lacks
     RollingFile { dir: PathBuf, source: Box<dyn Error + Send + Sync> },
     Exporter { signal: Signal, source: OtlpError },
+    SampleRatio(f64),                                     // NaN or outside 0.0..=1.0
+    DuplicateOtlpLogSink,                                 // more than one `LogSinkKind::Otlp`
 }
 pub enum Signal { Traces, Logs }
 pub enum OtlpError {
@@ -183,8 +192,13 @@ pub enum OtlpError {
 }
 pub enum MetricsError {
     Bind(io::Error),
-    Install(Box<dyn Error + Send + Sync>),
+    Install(Box<dyn Error + Send + Sync>),                // an empty bucket list lands here too
     Exporter(OtlpError),
+}
+pub enum PropagationError {                               // `otel` only
+    NoOtelLayer,                                          // the pipeline has no tracing
+    AlreadyStarted,                                       // set the parent before entering the span
+    SpanDisabled,                                         // filters drop the span
 }
 ```
 
@@ -194,11 +208,105 @@ type appears in a public signature; the install site picks the source.
 ## Config surface
 
 `PipelineConfig` and its parts are plain data with no `opentelemetry` type in any field:
-`LoggingConfig` / `LogSink` / `LogSinkKind` / `LogFormat` / `Rotation`, `TracingConfig`,
-`MetricsConfig` / `MetricsExporter`, and `OtlpConfig` / `OtlpProtocol` / `OtlpTls` /
+`LoggingConfig` / `LogSink` / `LogSinkKind` / `LogFormat` / `Rotation` / `LineQueue` /
+`Overflow`, `TracingConfig` / `ExportBatch`, `MetricsConfig` / `MetricsExporter` /
+`PrometheusConfig` / `PrometheusHistograms`, and `OtlpConfig` / `OtlpProtocol` / `OtlpTls` /
 `TlsRoots` / `ClientCert`. The runtime gate helpers (`metrics_enabled`,
 `set_metrics_enabled`) and the whole `observability_core` crate are re-exported, so a binary
 drives the hot-path gate through `observability` without a second dependency line.
+
+Each config type implements `Default`. Together the defaults build a working pipeline that
+doesn't need a tokio runtime: `ObsConfig::default()` logs JSON to stdout at `info` for service
+`unknown_service` and leaves `otlp`, `tracing`, and `metrics` unset. Set the fields that differ
+and end the literal with `..Default::default()`. The types have no `#[non_exhaustive]`, which
+keeps struct literals working outside the crate; a minor release before 1.0 may still add
+fields.
+
+### Config files
+
+With the `serde` feature, each config type also implements `Deserialize`. A service can then
+read its whole config from TOML, YAML, or JSON:
+
+```toml
+[pipeline]
+service_name = "feed-handler"
+
+[pipeline.otlp]
+endpoint = "https://collector.example:4318"
+timeout_ms = 5000
+headers = { authorization = "Bearer <token>" }
+resource = { "deployment.environment" = "prod" }
+
+[[pipeline.logging.sinks]]
+kind = "stdout"
+
+[[pipeline.logging.sinks]]
+kind = { rolling_file = { dir = "/var/log/feed", prefix = "feed", max_files = 7 } }
+queue = { lines = 50000, overflow = "block" }
+
+[pipeline.tracing]
+sample_ratio = 0.1
+batch = { queue_size = 4096, delay_ms = 2000 }
+
+[metrics.exporter.prometheus]
+bind = "0.0.0.0:9000"
+idle_timeout_ms = 300000
+```
+
+1. Names are snake_case, and an unknown field fails with its name, inside a `rolling_file` or
+   `prometheus` table too.
+2. An omitted field takes its type's `Default`. A partial table, such as `otlp_batch` with only
+   `queue_size`, fills the rest from that table type's `Default`.
+3. A `Duration` is integer milliseconds in a field ending in `_ms`: `timeout_ms`, `delay_ms`,
+   `idle_timeout_ms`.
+4. An enum is a string for a unit variant (`kind = "stdout"`) and a one-key table otherwise
+   (`kind = { rolling_file = { ... } }`).
+5. Headers and resource attributes are tables, one entry per key.
+6. There is no `Serialize`, because it would write header values, usually credentials, back
+   out.
+
+Parse the file with the format crate of your choice, for example
+`toml::from_str::<ObsConfig>(&text)?`, then pass the value to `init`.
+
+## Tracing level and sampling
+
+`TracingConfig::level` filters exported spans. Without it, the pipeline `level` applies, and a
+set `RUST_LOG` overrides both, as it does for every sink.
+
+`TracingConfig::sample_ratio` samples root spans with that probability; a child follows its
+parent's decision, remote parents included. Init rejects a NaN ratio, or one outside
+`0.0..=1.0`, with `PipelineError::SampleRatio`. With no ratio the SDK default sampler stays. It
+reads `OTEL_TRACES_SAMPLER`, which keeps the other samplers available.
+
+## Trace context propagation
+
+With tracing on, `init` sets the W3C trace context propagator as the process-wide OTel text map
+propagator, so OTel-aware HTTP and gRPC middleware works without setup. It replaces a
+propagator set before `init`; a propagator set after `init` wins. `observability::propagation`
+reads and writes `traceparent` and `tracestate` as plain string pairs, with no
+`opentelemetry` dependency:
+
+```rust,no_run
+use observability::{
+    PropagationError,
+    propagation::{set_parent_from_headers, trace_headers},
+};
+
+fn handle(incoming: &[(&str, &str)]) -> Result<Vec<(String, String)>, PropagationError> {
+    let span = tracing::info_span!("handle_request");
+    // set the remote parent before the span is entered or its headers are read
+    set_parent_from_headers(&span, incoming.iter().copied())?;
+    let _entered = span.enter();
+
+    // headers for an outgoing call made inside this span
+    Ok(trace_headers(&span))
+}
+```
+
+Header names match in any case. Without a valid `traceparent`, the span keeps its local parent
+and the call returns `Ok`. Entering the span or reading its headers starts its OTel context and
+fixes its parent, so a later `set_parent_from_headers` returns
+`PropagationError::AlreadyStarted`. Baggage and other propagators are not covered.
 
 ## Log level precedence
 
@@ -218,10 +326,19 @@ limit too. `max_files: None` keeps every file.
 
 ## Delivery limits
 
-Span export holds at most `TracingConfig::batch.queue_size` spans (an `ExportBatch`, 2048 by
-default) from span end to the end of their export. A span past that bound is dropped, and so is
-every span in a batch whose export fails. Each drop is counted in `PipelineGuard::dropped()` and
-in the `observability.dropped` counter, labeled by `signal` and `reason`. The SDK's
+Every queue between the app and a sink has a fixed bound, and every item lost to a full queue or
+a failed export is counted.
+
+Each stdout and rolling-file sink buffers at most `LogSink::queue.lines` lines (a `LineQueue`,
+128,000 by default). With `Overflow::Drop`, the default, a line that finds the buffer full is
+dropped and counted. `Overflow::Block` makes the logging thread wait for space and loses
+nothing; never use it on a latency-sensitive thread, since a slow disk or stdout then stalls
+that thread.
+
+From span end to the end of its export, a span takes one of `TracingConfig::batch.queue_size`
+slots (an `ExportBatch`, 2048 by default). The span that finds them all taken is dropped. So is
+each span in a batch whose export fails. `PipelineGuard::dropped()` counts every drop, and so
+does the `observability.dropped` counter, labeled by `signal` and `reason`. The SDK's
 `OTEL_BSP_*` env vars are not read: `ExportBatch::queue_size`, `max_batch_size`, and `delay`
 replace them, because counting drops exactly needs the queue size the crate sets.
 
@@ -230,6 +347,44 @@ partial batch after 1 s, and the SDK's `OTEL_BLRP_*` env vars are not read eithe
 may have at most one `LogSinkKind::Otlp` sink; a second one returns
 `PipelineError::DuplicateOtlpLogSink`.
 
+| SDK env var, not read | Set instead |
+| --- | --- |
+| `OTEL_BSP_MAX_QUEUE_SIZE`, `OTEL_BLRP_MAX_QUEUE_SIZE` | `ExportBatch::queue_size` |
+| `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`, `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | `ExportBatch::max_batch_size` |
+| `OTEL_BSP_SCHEDULE_DELAY`, `OTEL_BLRP_SCHEDULE_DELAY` | `ExportBatch::delay` |
+| `OTEL_BSP_EXPORT_TIMEOUT`, `OTEL_BLRP_EXPORT_TIMEOUT` | `OtlpConfig::timeout` |
+
+The counter's `reason` label is `queue_full`, `export_failed`, or `buffer_full`, and Prometheus
+writes it as `observability_dropped`. A drop that happens before `init_metrics` installs a
+recorder is counted only in the guard's totals, which a service without a recorder can read
+directly:
+
+```rust,no_run
+fn report_drops(guard: &observability::PipelineGuard) {
+    let lost = guard.dropped();
+    tracing::info!(traces = lost.traces, logs = lost.logs, "telemetry dropped since init");
+}
+```
+
+## Prometheus recorder
+
+`MetricsExporter::Prometheus(PrometheusConfig)` serves a pull endpoint:
+
+1. `bind` defaults to `127.0.0.1:9000`, so a default build does not serve metrics on every
+   interface. A container scraped from outside sets `0.0.0.0:9000`.
+2. `histograms` defaults to `PrometheusHistograms::Buckets` with the Prometheus client default
+   seconds buckets, `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]`, which
+   combine across instances in PromQL. `PrometheusHistograms::Summaries` exports quantile
+   summaries instead.
+3. `idle_timeout` (`idle_timeout_ms` in a file) drops a counter or histogram series not updated
+   for that long, so changing label values do not grow memory until exit. Gauges are kept. A
+   counter that comes back starts at zero, which `rate()` reads as a reset. The default is
+   `None`.
+4. Each series has a `service_name` label set to the service name passed to `init_metrics`.
+
+The exporter builds with only its `http-listener` feature, without the push-gateway client and
+its `aws-lc-rs` TLS provider.
+
 ## Building without backends
 
 With `--no-default-features`, the otel and recorder wiring is compiled out. Config that needs a
@@ -237,6 +392,12 @@ disabled feature returns `PipelineError::FeatureDisabled` naming it: tracing wit
 OTLP log sink without `otel-logs`, a bunyan sink without `bunyan`, or an `https://` endpoint
 without `tls` (`OtlpError::FeatureDisabled` inside `PipelineError::Exporter`). The
 `--feature-powerset --depth 2` CI job builds the combinations.
+
+## MSRV
+
+Rust 1.88.0. The MSRV is the highest `rust-version` among the packages Cargo resolves for the CI
+platforms, with all features and targets, and the CI MSRV cell builds and tests on it. The
+workspace uses `resolver = "3"`, so `cargo update` keeps dependencies at versions that fit.
 
 ## License
 
