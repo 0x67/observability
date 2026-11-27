@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the writer sink queue, drop counters, and bounded export queues, the Prometheus recorder, the metrics recorder guard, the OTLP config debug output, OTLP endpoint credentials, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -273,6 +273,20 @@ Constructing a `MetricsGuard` flips the `observability-core` gate on; dropping t
 
 Formatting an `OtlpConfig` that has header `("x-api-key", "s3cr3t-value")` shows the header name paired with `[REDACTED]`, never the value, and still shows endpoint, protocol, resource, and timeout.
 
+## OTLP endpoint credentials
+
+A user name or password in the endpoint would reach error text, upstream URI errors included, so exporter setup rejects it before any other step.
+
+### Endpoint credentials are rejected before other checks
+
+`https://user:pa55word@collector:4318` over HTTP, `http://user:pa55word@collector:4317` and `http://token@collector:4317` over gRPC, and the scheme-less `user:pa55word@collector:4318` over HTTP each return `OtlpError::EndpointCredentials`.
+
+Each config also has a header that the next check rejects, so only a credential check that runs first passes. Neither the error's `Display` nor its `Debug` contains the password or the host.
+
+### At sign outside authority is not a credential
+
+An `@` in the path or query (`http://collector:4318/v1/traces?x=a@b`, `http://collector:4318/users/a@b/traces`) is not a credential, and neither is an endpoint without one (`collector:4317`).
+
 ## OTLP layer filters
 
 The OTel span layer, the OTLP log bridge, and the bunyan span storage each carry a filter, so the global max level stays at the configured level and exporter threads produce no OTLP telemetry.
@@ -330,6 +344,10 @@ Tracing over HTTP to `http://exa mple:4318` returns `PipelineError::Exporter` wi
 ### OTLP metrics with invalid endpoint returns exporter error
 
 `init_metrics` with the OTLP exporter over gRPC to `http://exa mple:4317` returns `MetricsError::Exporter(OtlpError::Build(_))` and leaves the metrics gate off.
+
+### Endpoint with credentials returns exporter error without the secret
+
+Tracing over HTTP to `http://user:s3cret@127.0.0.1:1` returns `PipelineError::Exporter` with `Signal::Traces` and an `OtlpError::EndpointCredentials` source. Neither the error's `Debug` nor any `Display` in its source chain contains `s3cret`.
 
 ## Rolling file sink
 

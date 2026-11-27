@@ -58,6 +58,8 @@ Message counting mirrors the same shape: a plain per-thread `Cell<u64>` on the h
 
 Its `Debug` output prints each header name with `[REDACTED]` in place of the value, because header values usually carry API keys. `PipelineConfig` derives `Debug` and embeds the `OtlpConfig`, so `?cfg` in a log line is safe for both.
 
+An endpoint with a user name or password (an `@` before the first `/` after the scheme) returns `OtlpError::EndpointCredentials` as the first step of every exporter setup. Later errors, opentelemetry-otlp's `InvalidUri` among them, print the endpoint, and this check runs before any of them. Its own message leaves the endpoint out and tells the user to pass credentials in `headers`.
+
 `pipeline/otel.rs` and `metrics.rs` each call its exporter builders directly: `span_exporter` for tracing, `metric_exporter` (under `metrics-otel`) for the metrics bridge, `log_exporter` (under `otel-logs`) for the log bridge layer, all off the same endpoint/timeout/headers pair. No `opentelemetry` type crosses into a public `observability` signature; the builders stay `pub(crate)` and otel-gated.
 
 [[crates/observability/src/otlp/runtime.rs#ExportRuntime]] is the one tokio runtime (multi-thread, 1 worker, threads named `observability-otlp`) that runs every exporter's I/O, so OTLP export works with or without an app runtime. gRPC exporters are built inside its context, so tonic spawns its channel worker there. HTTP exporters send through [[crates/observability/src/otlp/http_client.rs#RuntimeHttpClient]], an async reqwest client whose requests are spawned onto that runtime.
