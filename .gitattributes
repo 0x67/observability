@@ -1,0 +1,3 @@
+# The snapshot is compared byte for byte with the exporter output, so a Windows checkout
+# with core.autocrlf must keep it at LF.
+crates/observability/src/metrics/snapshots/*.txt text eol=lf
