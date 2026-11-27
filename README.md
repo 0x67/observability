@@ -173,4 +173,5 @@ The `compat_table` test checks the last row of the [compatibility table](#compat
 against `Cargo.lock` and the manifests. When a pull request moves a listed crate to another
 minor version or changes the MSRV, update the last row, or add a row for the next release if
 the last row's tag is already out. A release pull request fails until the last row is for its
-version.
+version. The test does not check the `observability-core` cell, so set it by hand to the core
+version that release builds with.

@@ -509,7 +509,7 @@ The README `## Compatibility` table is read with `include_str!` and checked agai
 
 The header lists the ten columns in order. The last row holds each listed crate's locked major.minor, `in-crate` while `metrics-exporter-otel` is not locked, and the workspace `rust-version`.
 
-When the last row's tag version equals `CARGO_PKG_VERSION`, its `observability-core` cell must equal the core manifest's version. Before a release the last row is for the upcoming tag, and the core version moves only in the release pull request.
+The `observability-core` cell is not checked. Core releases on its own, so after a core-only release the core manifest no longer matches the row of the last `observability` tag.
 
 Each failure line gives the column, the README value, and the value in the build.
 
