@@ -36,9 +36,11 @@ type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync>;
 /// # Errors
 ///
 /// Every check runs before install, so an error leaves no subscriber set.
-/// [`PipelineError::FeatureDisabled`] when the config needs a cargo feature this build
-/// lacks, [`PipelineError::MissingOtlp`] when tracing or an OTLP log sink has no `otlp`,
-/// and [`PipelineError::Exporter`] when the export runtime or an exporter fails to build.
+/// [`PipelineError::SampleRatio`] for a trace sample ratio that is NaN or outside
+/// `0.0..=1.0`, [`PipelineError::FeatureDisabled`] when the config needs a cargo feature
+/// this build lacks, [`PipelineError::MissingOtlp`] when tracing or an OTLP log sink has no
+/// `otlp`, and [`PipelineError::Exporter`] when the export runtime or an exporter fails to
+/// build.
 /// A second call returns [`PipelineError::AlreadyInit`].
 pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError> {
     let (layers, guard) = build_layers(&cfg)?;
@@ -52,6 +54,16 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
 
 /// Every layer and the guard that owns their writers, providers, and export runtime.
 fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard), PipelineError> {
+    // the SDK would clamp a bad ratio; in a config file it is a typo, so reject it
+    if let Some(ratio) = cfg
+        .tracing
+        .as_ref()
+        .and_then(|tracing| tracing.sample_ratio)
+        .filter(|ratio| !(0.0..=1.0).contains(ratio))
+    {
+        return Err(PipelineError::SampleRatio(ratio));
+    }
+
     let sinks = cfg
         .logging
         .as_ref()
@@ -110,4 +122,49 @@ fn reject_otlp_signals(cfg: &PipelineConfig, sinks: &[LogSink]) -> Result<(), Pi
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_layers;
+    use crate::{
+        config::{PipelineConfig, TracingConfig},
+        error::PipelineError,
+    };
+
+    fn with_ratio(ratio: f64) -> PipelineConfig {
+        PipelineConfig {
+            logging: None,
+            tracing: Some(TracingConfig {
+                sample_ratio: Some(ratio),
+                ..TracingConfig::default()
+            }),
+            ..PipelineConfig::default()
+        }
+    }
+
+    // @lat: [[tests#Tracing config#Sample ratio outside unit range is rejected]]
+    #[test]
+    fn sample_ratio_outside_unit_range_is_rejected() {
+        for ratio in [-0.1, 1.5, f64::NAN] {
+            let result = build_layers(&with_ratio(ratio));
+
+            assert!(
+                matches!(result, Err(PipelineError::SampleRatio(r)) if r.to_bits() == ratio.to_bits()),
+                "{ratio}: {:?}",
+                result.err()
+            );
+        }
+
+        // otlp is unset, so a ratio that passes this check fails the next one
+        for ratio in [0.0, 1.0] {
+            let result = build_layers(&with_ratio(ratio));
+
+            assert!(
+                matches!(result, Err(ref e) if !matches!(e, PipelineError::SampleRatio(_))),
+                "{ratio}: {:?}",
+                result.err()
+            );
+        }
+    }
 }

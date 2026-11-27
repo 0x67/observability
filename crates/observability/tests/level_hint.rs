@@ -7,9 +7,7 @@ mod http_collector;
 
 use std::time::Duration;
 
-use observability::{
-    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
-};
+use observability::{OtlpConfig, OtlpProtocol, PipelineConfig, TracingConfig, init_pipeline};
 use tracing::level_filters::LevelFilter;
 
 // @lat: [[tests#OTLP layer filters#Tracing on keeps global max level and drops debug spans]]
@@ -28,9 +26,7 @@ fn tracing_on_keeps_global_max_level_and_drops_debug_spans() {
             ..Default::default()
         }),
         logging: None,
-        tracing: Some(TracingConfig {
-            exporter: TraceExporter::Otlp,
-        }),
+        tracing: Some(TracingConfig::default()),
     };
 
     let guard = init_pipeline(cfg).expect("pipeline installs");

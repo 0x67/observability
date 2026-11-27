@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use observability::{
     LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, ObsConfig,
-    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init,
+    OtlpConfig, OtlpProtocol, PipelineConfig, TracingConfig, init,
 };
 
 const SERVICE: &str = "signal-paths-probe";
@@ -37,9 +37,7 @@ fn one_endpoint_sends_each_signal_to_its_path() {
                     level: None,
                 }],
             }),
-            tracing: Some(TracingConfig {
-                exporter: TraceExporter::Otlp,
-            }),
+            tracing: Some(TracingConfig::default()),
         },
         metrics: Some(MetricsConfig {
             exporter: MetricsExporter::Otlp,

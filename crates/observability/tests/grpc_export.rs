@@ -7,9 +7,7 @@ mod grpc_collector;
 
 use std::time::Duration;
 
-use observability::{
-    OtlpConfig, OtlpProtocol, PipelineConfig, TraceExporter, TracingConfig, init_pipeline,
-};
+use observability::{OtlpConfig, OtlpProtocol, PipelineConfig, TracingConfig, init_pipeline};
 
 // @lat: [[tests#OTLP headers#gRPC export without app runtime sends headers as metadata]]
 #[test]
@@ -33,9 +31,7 @@ fn grpc_export_without_app_runtime_sends_headers_as_metadata() {
             ..Default::default()
         }),
         logging: None,
-        tracing: Some(TracingConfig {
-            exporter: TraceExporter::Otlp,
-        }),
+        tracing: Some(TracingConfig::default()),
     };
 
     let guard = init_pipeline(cfg).expect("pipeline installs");

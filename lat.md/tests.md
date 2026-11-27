@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -137,6 +137,22 @@ The default config values build a working pipeline, so a caller sets only the fi
 `OtlpConfig { endpoint: <mock base URL>, ..Default::default() }` with `TracingConfig::default()` and no app runtime sends the span in a `POST /v1/traces` with `content-type: application/x-protobuf`.
 
 A gRPC default would send nothing the HTTP mock accepts.
+
+## Tracing config
+
+`TracingConfig` filters exported spans by its own level and samples root spans by its ratio.
+
+### Sample ratio outside unit range is rejected
+
+`build_layers` with a sample ratio of `-0.1`, `1.5`, or NaN returns `PipelineError::SampleRatio` with that ratio. Ratios `0.0` and `1.0` pass the check and fail on the missing `otlp` instead.
+
+### Tracing level filters exported spans
+
+With pipeline level `info`, a stdout sink at `info`, and `TracingConfig::level` `warn`, the HTTP mock receives `warn_span!("warn-span")` and not `info_span!("info-span")`.
+
+### Zero ratio exports no root spans
+
+With `sample_ratio` 0 the HTTP mock never receives the root span `root-span`. A span whose parent is a sampled remote span context arrives, so spans do reach the mock under this sampler.
 
 ## Config files
 

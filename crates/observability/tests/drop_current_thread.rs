@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use observability::{
     MetricsConfig, MetricsExporter, ObsConfig, OtlpConfig, OtlpProtocol, PipelineConfig,
-    TraceExporter, TracingConfig, init,
+    TracingConfig, init,
 };
 
 // @lat: [[tests#Guard drop#ObsGuard drop inside current_thread runtime delivers final batch]]
@@ -29,9 +29,7 @@ fn obs_guard_drop_inside_current_thread_runtime_delivers_final_batch() {
                 ..Default::default()
             }),
             logging: None,
-            tracing: Some(TracingConfig {
-                exporter: TraceExporter::Otlp,
-            }),
+            tracing: Some(TracingConfig::default()),
         },
         metrics: Some(MetricsConfig {
             exporter: MetricsExporter::Otlp,

@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use observability::{
     MetricsConfig, MetricsExporter, OtlpConfig, OtlpProtocol, OtlpTls, PipelineConfig,
-    TraceExporter, TracingConfig, init_metrics, init_pipeline,
+    TracingConfig, init_metrics, init_pipeline,
 };
 
 fn otlp(protocol: OtlpProtocol, endpoint: String, tls: OtlpTls) -> OtlpConfig {
@@ -40,9 +40,7 @@ fn custom_ca_and_client_cert_export_on_both_transports() {
         level: "info".to_owned(),
         otlp: Some(otlp(OtlpProtocol::Grpc, grpc_endpoint, pki.otlp_tls())),
         logging: None,
-        tracing: Some(TracingConfig {
-            exporter: TraceExporter::Otlp,
-        }),
+        tracing: Some(TracingConfig::default()),
     })
     .expect("pipeline installs");
     let metrics = init_metrics(
