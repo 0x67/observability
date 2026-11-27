@@ -24,7 +24,7 @@ Using both crates? Pin both to the same tag, the newest one of either component.
 on one git url check out two copies of the repository, and `observability-core` types from
 one copy do not match the other.
 
-```rust
+```rust,no_run
 use std::time::Duration;
 use observability::{
     init, ObsConfig, PipelineConfig, LoggingConfig, LogSink, LogSinkKind, LogFormat,

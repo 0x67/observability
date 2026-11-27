@@ -44,7 +44,7 @@ before touching it. An OTLP exporter that fails to build returns `MetricsError::
 
 ### `init`: both at once
 
-```rust
+```rust,ignore
 pub fn init(cfg: ObsConfig) -> Result<ObsGuard, PipelineError>;
 ```
 
@@ -98,7 +98,7 @@ init, and the error message includes the header name and never its value.
 TLS applies only to `https://` endpoints; `http://localhost` stays plain text. `OtlpConfig::tls`
 holds an `OtlpTls`:
 
-```rust
+```rust,ignore
 OtlpTls {
     roots: TlsRoots::Native,          // which roots to trust
     ca_file: None,                    // PEM file of extra CA certificates
@@ -160,7 +160,7 @@ alone.
 
 ## Errors
 
-```rust
+```rust,ignore
 pub enum PipelineError {
     AlreadyInit,
     MissingOtlp(Signal),                                  // tracing or an OTLP log sink without `otlp`

@@ -29,6 +29,14 @@ pub use observability_core::{metrics_enabled, set_metrics_enabled};
 pub use otlp::{ClientCert, OtlpConfig, OtlpProtocol, OtlpTls, TlsRoots};
 pub use pipeline::{PipelineGuard, init_pipeline};
 
+#[cfg(doctest)]
+#[doc = include_str!("../../../README.md")]
+pub struct RootReadmeDoctests;
+
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
+
 /// Both subsystems in one value. `metrics` is optional so a build can run logging + tracing
 /// without a recorder. The default is the default pipeline with no metrics recorder.
 #[derive(Default)]
