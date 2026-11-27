@@ -101,6 +101,10 @@ metadata. A header whose name or value is not valid HTTP returns `OtlpError::Inv
 init, and the error message includes the header name and never its value.
 `opentelemetry-otlp` still merges `OTEL_EXPORTER_OTLP_HEADERS` on top.
 
+An endpoint with a user name or password, such as `https://user:pass@collector:4318`, returns
+`OtlpError::EndpointCredentials` at init before any other OTLP check, and the error leaves the
+endpoint out. Send credentials in `headers`.
+
 ### TLS
 
 TLS applies only to `https://` endpoints; `http://localhost` stays plain text. `OtlpConfig::tls`
@@ -187,6 +191,7 @@ pub enum OtlpError {
     TlsFile { path: PathBuf, source: io::Error },
     InvalidPem { path: PathBuf, source: Box<dyn Error + Send + Sync> },
     PlatformVerifier(Box<dyn Error + Send + Sync>),
+    EndpointCredentials,                                  // a user or password in `endpoint`
     InvalidHeader { name: String },
     Build(Box<dyn Error + Send + Sync>),                  // the exporter or HTTP client did not build
 }

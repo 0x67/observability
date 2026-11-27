@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use super::{OtlpConfig, OtlpProtocol, OtlpTls};
+use super::{OtlpConfig, OtlpProtocol};
 
 #[cfg(feature = "otel")]
 fn exporter_config(protocol: OtlpProtocol, endpoint: &str) -> OtlpConfig {
@@ -84,6 +84,61 @@ fn invalid_header_is_rejected_on_both_protocols() {
     }
 }
 
+// @lat: [[tests#OTLP endpoint credentials#Endpoint credentials are rejected before other checks]]
+#[cfg(feature = "otel")]
+#[test]
+fn endpoint_credentials_are_rejected_before_other_checks() {
+    use std::sync::PoisonError;
+
+    use super::{ExportRuntime, runtime::tests::SLOT_LOCK};
+    use crate::error::OtlpError;
+
+    let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    let runtime = ExportRuntime::shared().expect("export runtime starts");
+
+    for (protocol, endpoint) in [
+        (
+            OtlpProtocol::HttpProtobuf,
+            "https://user:pa55word@collector:4318",
+        ),
+        (OtlpProtocol::Grpc, "http://user:pa55word@collector:4317"),
+        (OtlpProtocol::Grpc, "http://token@collector:4317"),
+        (OtlpProtocol::HttpProtobuf, "user:pa55word@collector:4318"),
+    ] {
+        // the header check comes next and would fail on this header
+        let cfg = OtlpConfig {
+            headers: [("x api".to_owned(), "v".to_owned())].into(),
+            ..exporter_config(protocol, endpoint)
+        };
+
+        let err = cfg.span_exporter(&runtime).err();
+
+        let Some(err @ OtlpError::EndpointCredentials) = &err else {
+            panic!("{protocol:?} {endpoint}: {err:?}");
+        };
+        let text = format!("{err} {err:?}");
+        assert!(
+            !text.contains("pa55word") && !text.contains("collector"),
+            "{text}"
+        );
+    }
+}
+
+// @lat: [[tests#OTLP endpoint credentials#At sign outside authority is not a credential]]
+#[cfg(feature = "otel")]
+#[test]
+fn at_sign_outside_authority_is_not_a_credential() {
+    use super::endpoint_has_credentials;
+
+    for endpoint in [
+        "http://collector:4318/v1/traces?x=a@b",
+        "http://collector:4318/users/a@b/traces",
+        "collector:4317",
+    ] {
+        assert!(!endpoint_has_credentials(endpoint), "{endpoint}");
+    }
+}
+
 // needs an OS certificate store with at least one root, as on every CI image
 #[cfg(feature = "tls")]
 #[test]
@@ -110,7 +165,7 @@ fn https_endpoints_build_with_tls() {
 fn platform_roots_build_both_transports() {
     use std::sync::PoisonError;
 
-    use super::{ExportRuntime, TlsRoots, runtime::tests::SLOT_LOCK};
+    use super::{ExportRuntime, OtlpTls, TlsRoots, runtime::tests::SLOT_LOCK};
 
     let _lock = SLOT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     let runtime = ExportRuntime::shared().expect("export runtime starts");

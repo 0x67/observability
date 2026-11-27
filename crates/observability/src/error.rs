@@ -105,6 +105,9 @@ pub enum OtlpError {
     },
     #[error("cannot set up the OS certificate verifier")]
     PlatformVerifier(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    // the endpoint is left out on purpose: it holds the credential
+    #[error("the OTLP endpoint contains a user name or password; pass credentials in `headers`")]
+    EndpointCredentials,
     // the value is left out on purpose: header values are usually credentials
     #[error("header {name:?} is not a valid header name and value")]
     InvalidHeader { name: String },

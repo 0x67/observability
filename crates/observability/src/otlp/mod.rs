@@ -186,6 +186,8 @@ impl OtlpConfig {
     where
         B: WithExportConfig + WithTonicConfig,
     {
+        self.check_endpoint()?;
+
         // connect_lazy spawns the channel worker onto the runtime current at build time,
         // whether opentelemetry-otlp builds the channel or `platform_channel` does
         let _entered = runtime.handle().enter();
@@ -206,6 +208,8 @@ impl OtlpConfig {
         runtime: &ExportRuntime,
         path: &str,
     ) -> Result<B, OtlpError> {
+        self.check_endpoint()?;
+
         // opentelemetry-otlp drops an invalid header without a word, so reject it here
         self.header_map()?;
         let client = RuntimeHttpClient::new(self.reqwest_client()?, runtime.handle().clone());
@@ -215,6 +219,15 @@ impl OtlpConfig {
             .with_endpoint(self.signal_url(path))
             .with_timeout(self.timeout)
             .with_headers(self.http_headers()))
+    }
+
+    /// Rejects a user name or password in `endpoint`. Every exporter setup runs this first,
+    /// because later errors, upstream ones included, may print the endpoint.
+    fn check_endpoint(&self) -> Result<(), OtlpError> {
+        if endpoint_has_credentials(&self.endpoint) {
+            return Err(OtlpError::EndpointCredentials);
+        }
+        Ok(())
     }
 
     // opentelemetry-otlp sends to a programmatic HTTP endpoint as given, with no signal path
@@ -316,6 +329,20 @@ impl OtlpConfig {
         }
         builder.build()
     }
+}
+
+/// True when the authority part of `endpoint` has a `user@` or `user:password@` prefix.
+#[cfg(feature = "otel")]
+fn endpoint_has_credentials(endpoint: &str) -> bool {
+    let after_scheme = endpoint
+        .split_once("://")
+        .map_or(endpoint, |(_, rest)| rest);
+    // the authority ends at the first `/` only: stopping at `?` or `#` as well would let a
+    // password containing one of them pass and reach upstream URI errors
+    let authority = after_scheme
+        .split_once('/')
+        .map_or(after_scheme, |(authority, _)| authority);
+    authority.contains('@')
 }
 
 #[cfg(test)]

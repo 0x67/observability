@@ -177,6 +177,42 @@ fn invalid_endpoint_returns_exporter_error() {
     );
 }
 
+// @lat: [[tests#Init contract#Endpoint with credentials returns exporter error without the secret]]
+#[cfg(feature = "otel")]
+#[test]
+fn endpoint_with_credentials_returns_exporter_error_without_the_secret() {
+    use std::{error::Error, time::Duration};
+
+    use observability::{OtlpConfig, OtlpError, OtlpProtocol, Signal};
+
+    let err = init_error(PipelineConfig {
+        tracing: tracing_on(),
+        otlp: Some(OtlpConfig {
+            endpoint: "http://user:s3cret@127.0.0.1:1".to_owned(),
+            protocol: OtlpProtocol::HttpProtobuf,
+            timeout: Duration::from_secs(1),
+            ..Default::default()
+        }),
+        ..config()
+    });
+
+    assert!(
+        matches!(
+            err,
+            PipelineError::Exporter {
+                signal: Signal::Traces,
+                source: OtlpError::EndpointCredentials,
+            }
+        ),
+        "{err:?}"
+    );
+    let chain: Vec<String> = std::iter::successors(Some(&err as &dyn Error), |&e| e.source())
+        .map(ToString::to_string)
+        .collect();
+    let text = format!("{err:?} {}", chain.join(": "));
+    assert!(!text.contains("s3cret"), "{text}");
+}
+
 // @lat: [[tests#Rolling file sink#Rolling file in unwritable dir returns err]]
 #[test]
 fn rolling_file_in_unwritable_dir_returns_err() {
