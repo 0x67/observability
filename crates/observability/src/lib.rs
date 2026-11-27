@@ -21,7 +21,8 @@ mod redact;
 
 pub use config::{
     ExportBatch, LineQueue, LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig,
-    MetricsExporter, Overflow, PipelineConfig, Rotation, TracingConfig,
+    MetricsExporter, Overflow, PipelineConfig, PrometheusConfig, PrometheusHistograms, Rotation,
+    TracingConfig,
 };
 #[cfg(feature = "otel")]
 pub use error::PropagationError;

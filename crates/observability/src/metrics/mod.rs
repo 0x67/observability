@@ -7,7 +7,6 @@
 //! Module named `metrics`, same as the extern facade crate. Reach the facade with a
 //! leading `::metrics::`; bare `metrics::` resolves here instead.
 
-use std::net::SocketAddr;
 #[cfg(feature = "metrics-otel")]
 use std::sync::Arc;
 
@@ -16,10 +15,12 @@ use opentelemetry::metrics::MeterProvider as _;
 #[cfg(feature = "metrics-otel")]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
+#[cfg(feature = "metrics-prom")]
+use crate::config::PrometheusHistograms;
 #[cfg(feature = "metrics-otel")]
 use crate::otlp::ExportRuntime;
 use crate::{
-    config::{MetricsConfig, MetricsExporter},
+    config::{MetricsConfig, MetricsExporter, PrometheusConfig},
     error::MetricsError,
     otlp::OtlpConfig,
 };
@@ -92,7 +93,7 @@ pub fn init_metrics(
     service_name: &str,
 ) -> Result<MetricsGuard, MetricsError> {
     match cfg.exporter {
-        MetricsExporter::Prometheus { bind } => install_prometheus(bind),
+        MetricsExporter::Prometheus(prometheus) => install_prometheus(&prometheus, service_name),
         MetricsExporter::Otlp => install_otlp(otlp, service_name),
     }
 }
@@ -106,12 +107,31 @@ fn disabled(feature: &str, exporter: &str) -> MetricsError {
     )
 }
 
+/// Every series gets a `service_name` label, the Prometheus spelling of OTLP's
+/// `service.name`. An empty bucket list is an install error.
 #[cfg(feature = "metrics-prom")]
-fn install_prometheus(bind: SocketAddr) -> Result<MetricsGuard, MetricsError> {
-    metrics_exporter_prometheus::PrometheusBuilder::new()
-        .with_http_listener(bind)
-        .install()
-        .map_err(map_prometheus_build_error)?;
+fn install_prometheus(
+    cfg: &PrometheusConfig,
+    service_name: &str,
+) -> Result<MetricsGuard, MetricsError> {
+    use metrics_util::MetricKindMask;
+
+    let builder = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .with_http_listener(cfg.bind)
+        .add_global_label("service_name", service_name)
+        // gauges stay: one set once, such as a configured limit, would vanish
+        .idle_timeout(
+            MetricKindMask::COUNTER | MetricKindMask::HISTOGRAM,
+            cfg.idle_timeout,
+        );
+    let builder = match &cfg.histograms {
+        PrometheusHistograms::Buckets(bounds) => builder
+            .set_buckets(bounds)
+            .map_err(map_prometheus_build_error)?,
+        PrometheusHistograms::Summaries => builder,
+    };
+
+    builder.install().map_err(map_prometheus_build_error)?;
     // prometheus path holds no otel provider; the empty state is `()` without `metrics-otel`.
     #[allow(clippy::unit_arg)]
     Ok(MetricsGuard::new(Default::default()))
@@ -131,7 +151,10 @@ fn map_prometheus_build_error(err: metrics_exporter_prometheus::BuildError) -> M
 }
 
 #[cfg(not(feature = "metrics-prom"))]
-fn install_prometheus(_bind: SocketAddr) -> Result<MetricsGuard, MetricsError> {
+fn install_prometheus(
+    _cfg: &PrometheusConfig,
+    _service_name: &str,
+) -> Result<MetricsGuard, MetricsError> {
     Err(disabled("metrics-prom", "prometheus"))
 }
 

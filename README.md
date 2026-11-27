@@ -28,7 +28,7 @@ one copy do not match the other.
 use std::time::Duration;
 use observability::{
     init, ObsConfig, PipelineConfig, LoggingConfig, LogSink, LogSinkKind, LogFormat,
-    TracingConfig, MetricsConfig, MetricsExporter, OtlpConfig, OtlpProtocol,
+    TracingConfig, MetricsConfig, MetricsExporter, OtlpConfig, OtlpProtocol, PrometheusConfig,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,7 +57,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing: Some(TracingConfig::default()),
         },
         metrics: Some(MetricsConfig {
-            exporter: MetricsExporter::Prometheus { bind: "0.0.0.0:9000".parse()? },
+            exporter: MetricsExporter::Prometheus(PrometheusConfig {
+                bind: "0.0.0.0:9000".parse()?,
+                ..Default::default()
+            }),
         }),
     };
 
