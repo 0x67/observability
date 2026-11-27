@@ -50,6 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     kind: LogSinkKind::Stdout,
                     format: LogFormat::Json,
                     level: None,
+                    ..Default::default()
                 }],
             }),
             tracing: Some(TracingConfig::default()),

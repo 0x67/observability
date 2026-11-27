@@ -94,6 +94,7 @@ serde = ["dep:serde"]
 [dev-dependencies]
 rcgen = { workspace = true }
 serde_json = { workspace = true }
+metrics-util = { workspace = true, features = ["debugging"] }
 rustls = { workspace = true }
 tonic = { workspace = true, features = ["transport", "router", "codegen", "tls-ring"] }
 opentelemetry-proto = { workspace = true, features = [

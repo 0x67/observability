@@ -47,12 +47,19 @@ pub enum Signal {
     Logs,
 }
 
-impl fmt::Display for Signal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+impl Signal {
+    /// Lowercase name, as in OTLP paths and the `signal` metric label.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
             Self::Traces => "traces",
             Self::Logs => "logs",
-        })
+        }
+    }
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

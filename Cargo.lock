@@ -1124,6 +1124,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-otel",
  "metrics-exporter-prometheus",
+ "metrics-util",
  "observability-core",
  "opentelemetry",
  "opentelemetry-appender-tracing",

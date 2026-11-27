@@ -136,6 +136,7 @@ mod tests {
             kind: LogSinkKind::Stdout,
             format,
             level: Some(level.to_owned()),
+            ..Default::default()
         };
         let sinks = [
             sink(LogFormat::Bunyan, "info"),

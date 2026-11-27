@@ -20,8 +20,8 @@ pub mod propagation;
 mod redact;
 
 pub use config::{
-    LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, PipelineConfig,
-    Rotation, TracingConfig,
+    LineQueue, LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter,
+    Overflow, PipelineConfig, Rotation, TracingConfig,
 };
 #[cfg(feature = "otel")]
 pub use error::PropagationError;
@@ -31,7 +31,7 @@ pub use metrics::{MetricsGuard, init_metrics};
 pub use observability_core;
 pub use observability_core::{metrics_enabled, set_metrics_enabled};
 pub use otlp::{ClientCert, OtlpConfig, OtlpProtocol, OtlpTls, TlsRoots};
-pub use pipeline::{PipelineGuard, init_pipeline};
+pub use pipeline::{Dropped, PipelineGuard, init_pipeline};
 
 #[cfg(doctest)]
 #[doc = include_str!("../../../README.md")]

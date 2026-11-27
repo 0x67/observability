@@ -53,6 +53,8 @@ opentelemetry-appender-tracing = "0.31"
 # backend: metrics exporters
 metrics-exporter-prometheus = "0.17"
 metrics-exporter-otel = "0.3.1"
+# test-only here: `debugging` gives the in-memory recorder that tests read metrics from
+metrics-util = { version = "0.20.4", default-features = false }
 # shared
 thiserror = "2.0.18"
 # config files behind the `serde` feature; serde_json is test-only

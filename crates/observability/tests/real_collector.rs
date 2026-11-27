@@ -47,6 +47,7 @@ fn https_export_reaches_real_collector() {
                 },
                 format: LogFormat::Json,
                 level: None,
+                ..Default::default()
             }],
         }),
         tracing: Some(TracingConfig::default()),
