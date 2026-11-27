@@ -1,0 +1,23 @@
+# HELP feed_msgs messages received
+# TYPE feed_msgs counter
+feed_msgs{service_name="snapshot-svc",venue="x"} 3
+
+# TYPE feed_depth gauge
+feed_depth{service_name="snapshot-svc",venue="x"} 2.5
+
+# TYPE feed_latency histogram
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.005"} 1
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.01"} 1
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.025"} 1
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.05"} 1
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.1"} 1
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.25"} 2
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="0.5"} 2
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="1"} 2
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="2.5"} 2
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="5"} 2
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="10"} 2
+feed_latency_bucket{service_name="snapshot-svc",venue="x",le="+Inf"} 2
+feed_latency_sum{service_name="snapshot-svc",venue="x"} 0.254
+feed_latency_count{service_name="snapshot-svc",venue="x"} 2
+

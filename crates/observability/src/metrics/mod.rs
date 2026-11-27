@@ -110,13 +110,26 @@ fn disabled(feature: &str, exporter: &str) -> MetricsError {
     )
 }
 
-/// Every series gets a `service_name` label, the Prometheus spelling of OTLP's
-/// `service.name`. An empty bucket list is an install error.
 #[cfg(feature = "metrics-prom")]
 fn install_prometheus(
     cfg: &PrometheusConfig,
     service_name: &str,
 ) -> Result<MetricsGuard, MetricsError> {
+    prometheus_builder(cfg, service_name)?
+        .install()
+        .map_err(map_prometheus_build_error)?;
+    // prometheus path holds no otel provider; the empty state is `()` without `metrics-otel`.
+    #[allow(clippy::unit_arg)]
+    Ok(MetricsGuard::new(Default::default()))
+}
+
+/// Every series gets a `service_name` label, the Prometheus spelling of OTLP's
+/// `service.name`. An empty bucket list is an install error.
+#[cfg(feature = "metrics-prom")]
+fn prometheus_builder(
+    cfg: &PrometheusConfig,
+    service_name: &str,
+) -> Result<metrics_exporter_prometheus::PrometheusBuilder, MetricsError> {
     use metrics_util::MetricKindMask;
 
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -127,17 +140,12 @@ fn install_prometheus(
             MetricKindMask::COUNTER | MetricKindMask::HISTOGRAM,
             cfg.idle_timeout,
         );
-    let builder = match &cfg.histograms {
+    match &cfg.histograms {
         PrometheusHistograms::Buckets(bounds) => builder
             .set_buckets(bounds)
-            .map_err(map_prometheus_build_error)?,
-        PrometheusHistograms::Summaries => builder,
-    };
-
-    builder.install().map_err(map_prometheus_build_error)?;
-    // prometheus path holds no otel provider; the empty state is `()` without `metrics-otel`.
-    #[allow(clippy::unit_arg)]
-    Ok(MetricsGuard::new(Default::default()))
+            .map_err(map_prometheus_build_error),
+        PrometheusHistograms::Summaries => Ok(builder),
+    }
 }
 
 /// `FailedToCreateHTTPListener` is the only bind-shaped variant; the crate stringifies
@@ -213,6 +221,32 @@ mod tests {
         assert!(observability_core::metrics_enabled());
         drop(guard);
         assert!(!observability_core::metrics_enabled());
+    }
+
+    // @lat: [[tests#Prometheus recorder#Text render matches snapshot]]
+    #[cfg(feature = "metrics-prom")]
+    #[test]
+    fn prometheus_text_render_matches_snapshot() {
+        use ::metrics::{Unit, counter, describe_counter, gauge, histogram, with_local_recorder};
+
+        // one series per kind: the exporter renders series of one kind in hash order
+        let recorder = prometheus_builder(&PrometheusConfig::default(), "snapshot-svc")
+            .expect("default buckets are valid")
+            .build_recorder();
+        let handle = recorder.handle();
+        with_local_recorder(&recorder, || {
+            describe_counter!("feed.msgs", Unit::Count, "messages received");
+            counter!("feed.msgs", "venue" => "x").increment(3);
+            gauge!("feed.depth", "venue" => "x").set(2.5);
+            let latency = histogram!("feed.latency", "venue" => "x");
+            latency.record(0.004);
+            latency.record(0.25);
+        });
+
+        assert_eq!(
+            handle.render(),
+            include_str!("snapshots/prometheus_text.txt")
+        );
     }
 
     // @lat: [[tests#Init contract#OTLP metrics with invalid endpoint returns exporter error]]
