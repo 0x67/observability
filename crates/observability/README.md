@@ -224,6 +224,11 @@ in the `observability.dropped` counter, labeled by `signal` and `reason`. The SD
 `OTEL_BSP_*` env vars are not read: `ExportBatch::queue_size`, `max_batch_size`, and `delay`
 replace them, because counting drops exactly needs the queue size the crate sets.
 
+The OTLP log sink works the same way with `LoggingConfig::otlp_batch`, whose default exports a
+partial batch after 1 s, and the SDK's `OTEL_BLRP_*` env vars are not read either. A config
+may have at most one `LogSinkKind::Otlp` sink; a second one returns
+`PipelineError::DuplicateOtlpLogSink`.
+
 ## Building without backends
 
 With `--no-default-features`, the otel and recorder wiring is compiled out. Config that needs a

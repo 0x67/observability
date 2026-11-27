@@ -188,6 +188,10 @@ With `queue_size` 4, `max_batch_size` 1, and the first export stalled, 10 ended 
 
 With `queue_size` 4 and a first export that fails, 3 spans and a flush give `Dropped::traces` 3. Four more spans then all fit, and the next flush exports all 4.
 
+### Bounded log processor drops and counts past queue size
+
+The log chain with `queue_size` 4, `max_batch_size` 1, and the first export stalled: 10 emitted records leave `Dropped::logs` at 6, and the exporter has received exactly 4 records after shutdown.
+
 ### Wrappers forward resource to exporter
 
 A provider with resource `service.name=res-probe` passes it through both wrappers: after a flush, the test exporter's last `set_resource` call holds `service.name` `res-probe`.
@@ -228,6 +232,10 @@ Omitted fields come from each type's `Default`: level `info`, `Rotation::Daily`,
 ### TLS settings parse from file
 
 An `otlp.tls` table with `roots = "webpki"`, a `ca_file`, and a `client_cert` gives `TlsRoots::Webpki` and both paths. A `client_cert` without `key_file` fails and names the field.
+
+### Logging otlp batch defaults to one second delay when omitted
+
+`{"pipeline":{"logging":{"sinks":[]}}}` gives `otlp_batch.delay` of 1 s, `LoggingConfig`'s default, not the 5 s of `ExportBatch::default()`.
 
 ### Unknown field is rejected
 
@@ -290,6 +298,10 @@ Without the `otel` feature, `tracing: Some` returns `PipelineError::FeatureDisab
 ### OTLP log sink without otel-logs returns feature disabled
 
 Without the `otel-logs` feature, an OTLP log sink returns `PipelineError::FeatureDisabled { feature: "otel-logs" }` and leaves no global subscriber set.
+
+### Two OTLP log sinks return duplicate error
+
+Two `LogSinkKind::Otlp` sinks return `PipelineError::DuplicateOtlpLogSink` and leave no global subscriber set. `otlp` is unset, so the check runs before the provider setup, which would fail on it first.
 
 ### Bunyan sink without feature returns feature disabled
 

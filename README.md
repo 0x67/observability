@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     level: None,
                     ..Default::default()
                 }],
+                ..Default::default()
             }),
             tracing: Some(TracingConfig::default()),
         },

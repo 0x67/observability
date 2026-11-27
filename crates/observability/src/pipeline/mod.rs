@@ -18,10 +18,8 @@ use self::{
     sinks::{log_layer, rolling_appender},
     writer::sink_writer,
 };
-#[cfg(not(feature = "otel"))]
-use crate::config::LogSink;
 use crate::{
-    config::{LogSinkKind, PipelineConfig},
+    config::{LogSink, LogSinkKind, PipelineConfig},
     error::PipelineError,
 };
 
@@ -75,20 +73,12 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
 
 /// Every layer and the guard that owns their writers, providers, and export runtime.
 fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard), PipelineError> {
-    // the SDK would clamp a bad ratio; in a config file it is a typo, so reject it
-    if let Some(ratio) = cfg
-        .tracing
-        .as_ref()
-        .and_then(|tracing| tracing.sample_ratio)
-        .filter(|ratio| !(0.0..=1.0).contains(ratio))
-    {
-        return Err(PipelineError::SampleRatio(ratio));
-    }
-
     let sinks = cfg
         .logging
         .as_ref()
         .map_or(&[][..], |logging| logging.sinks.as_slice());
+    reject_invalid(cfg, sinks)?;
+
     let mut layers: Vec<BoxedLayer> = Vec::new();
     let mut workers = Vec::new();
     let dropped = DropCounters::default();
@@ -119,7 +109,7 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
     }
 
     #[cfg(feature = "otel")]
-    let otel = otel_layers(cfg, sinks, &mut layers, &dropped)?;
+    let otel = otel_layers(cfg, &mut layers, &dropped)?;
     #[cfg(not(feature = "otel"))]
     reject_otlp_signals(cfg, sinks)?;
 
@@ -130,6 +120,28 @@ fn build_layers(cfg: &PipelineConfig) -> Result<(Vec<BoxedLayer>, PipelineGuard)
         otel,
     };
     Ok((layers, guard))
+}
+
+/// Values no build can honor, checked before any sink or provider is built.
+fn reject_invalid(cfg: &PipelineConfig, sinks: &[LogSink]) -> Result<(), PipelineError> {
+    // the SDK would clamp a bad ratio; in a config file it is a typo, so reject it
+    if let Some(ratio) = cfg
+        .tracing
+        .as_ref()
+        .and_then(|tracing| tracing.sample_ratio)
+        .filter(|ratio| !(0.0..=1.0).contains(ratio))
+    {
+        return Err(PipelineError::SampleRatio(ratio));
+    }
+    // two bridges on one logger provider would export every record twice
+    let otlp_sinks = sinks
+        .iter()
+        .filter(|sink| matches!(sink.kind, LogSinkKind::Otlp))
+        .count();
+    if otlp_sinks > 1 {
+        return Err(PipelineError::DuplicateOtlpLogSink);
+    }
+    Ok(())
 }
 
 /// Without `otel`, every OTLP signal in the config needs a feature this build lacks.

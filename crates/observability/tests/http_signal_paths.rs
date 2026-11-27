@@ -37,6 +37,7 @@ fn one_endpoint_sends_each_signal_to_its_path() {
                     level: None,
                     ..Default::default()
                 }],
+                ..Default::default()
             }),
             tracing: Some(TracingConfig::default()),
         },

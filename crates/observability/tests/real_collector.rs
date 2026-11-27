@@ -49,6 +49,7 @@ fn https_export_reaches_real_collector() {
                 level: None,
                 ..Default::default()
             }],
+            ..Default::default()
         }),
         tracing: Some(TracingConfig::default()),
     })

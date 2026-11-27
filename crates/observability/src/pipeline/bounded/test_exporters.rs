@@ -1,10 +1,13 @@
-//! Exporters for the bounded processor tests, with a probe that reads what they received.
+//! Span and log exporters for the bounded processor tests, with a probe that reads what
+//! they received.
 
 use std::sync::{
     Arc, Mutex, PoisonError, RwLock, RwLockWriteGuard,
     atomic::{AtomicUsize, Ordering},
 };
 
+#[cfg(feature = "otel-logs")]
+use opentelemetry_sdk::logs::{LogBatch, LogExporter};
 use opentelemetry_sdk::{
     Resource,
     error::{OTelSdkError, OTelSdkResult},
@@ -86,6 +89,37 @@ impl TestSpanExporter {
 impl SpanExporter for TestSpanExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         self.probe.export(self.first, &self.calls, batch.len())
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.probe.set_resource(resource);
+    }
+}
+
+#[cfg(feature = "otel-logs")]
+#[derive(Debug)]
+pub(super) struct TestLogExporter {
+    first: FirstExport,
+    calls: AtomicUsize,
+    probe: Probe,
+}
+
+#[cfg(feature = "otel-logs")]
+impl TestLogExporter {
+    pub(super) fn new(first: FirstExport, probe: &Probe) -> Self {
+        Self {
+            first,
+            calls: AtomicUsize::new(0),
+            probe: probe.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "otel-logs")]
+impl LogExporter for TestLogExporter {
+    async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
+        self.probe
+            .export(self.first, &self.calls, batch.iter().count())
     }
 
     fn set_resource(&mut self, resource: &Resource) {
