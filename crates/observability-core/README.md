@@ -82,7 +82,7 @@ recovered rather than propagated, and telemetry survives a panicked holder.
 
 <!-- x-release-please-start-version -->
 ```toml
-observability-core = { git = "...", tag = "observability-core-v0.2.1", features = ["flush-tokio"] }
+observability-core = { git = "...", tag = "observability-core-v0.3.0", features = ["flush-tokio"] }
 ```
 <!-- x-release-please-end -->
 

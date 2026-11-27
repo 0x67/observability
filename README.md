@@ -18,7 +18,7 @@ records latency and message counts but must stay free of backend crates.
 <!-- x-release-please-start-version -->
 ```toml
 [dependencies]
-observability = { git = "https://github.com/0x67/observability", tag = "observability-v0.2.2" }
+observability = { git = "https://github.com/0x67/observability", tag = "observability-v0.3.0" }
 ```
 <!-- x-release-please-end -->
 
