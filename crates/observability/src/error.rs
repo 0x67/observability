@@ -28,6 +28,18 @@ pub enum PipelineError {
     SampleRatio(f64),
 }
 
+/// Why [`crate::propagation::set_parent_from_headers`] could not set a span's parent.
+#[cfg(feature = "otel")]
+#[derive(Debug, Error)]
+pub enum PropagationError {
+    #[error("no OTel span layer is installed; enable tracing in PipelineConfig")]
+    NoOtelLayer,
+    #[error("the span already started; set its parent before entering it or reading its headers")]
+    AlreadyStarted,
+    #[error("the span is filtered out and is not exported")]
+    SpanDisabled,
+}
+
 /// OTLP signal a pipeline error refers to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Signal {

@@ -15,12 +15,16 @@ mod error;
 mod metrics;
 mod otlp;
 mod pipeline;
+#[cfg(feature = "otel")]
+pub mod propagation;
 mod redact;
 
 pub use config::{
     LogFormat, LogSink, LogSinkKind, LoggingConfig, MetricsConfig, MetricsExporter, PipelineConfig,
     Rotation, TracingConfig,
 };
+#[cfg(feature = "otel")]
+pub use error::PropagationError;
 pub use error::{MetricsError, OtlpError, PipelineError, Signal};
 pub use metrics::{MetricsGuard, init_metrics};
 // hot-path gate lives in the leaf crate; re-export so a binary drives it through `observability`.

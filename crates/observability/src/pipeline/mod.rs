@@ -33,6 +33,10 @@ type BoxedLayer = Box<dyn Layer<Registry> + Send + Sync>;
 
 /// Build every layer, then install them as the global default via `try_init`.
 ///
+/// With tracing on, a successful install also sets the W3C trace context propagator as the
+/// process-wide OTel text map propagator, replacing one set earlier; one set after this
+/// call replaces it in turn.
+///
 /// # Errors
 ///
 /// Every check runs before install, so an error leaves no subscriber set.
@@ -49,6 +53,14 @@ pub fn init_pipeline(cfg: PipelineConfig) -> Result<PipelineGuard, PipelineError
         .with(layers)
         .try_init()
         .map_err(|_| PipelineError::AlreadyInit)?;
+
+    // other OTel-aware libraries read the global propagator; a failed init leaves it alone
+    #[cfg(feature = "otel")]
+    if cfg.tracing.is_some() {
+        opentelemetry::global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+        );
+    }
     Ok(guard)
 }
 

@@ -6,7 +6,7 @@ lat:
 
 Behavioral test specifications for the hot-path gate, sampler, counters, histogram merge, and slot retirement in `observability-core`.
 
-In `observability` they cover the config defaults and file format, tracing level and sampling, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
+In `observability` they cover the config defaults and file format, tracing level and sampling, trace context propagation, the metrics recorder guard, the OTLP config debug output, the OTLP layer filters, the init contract, the rolling file sink, OTLP headers, OTLP signal paths, TLS export, and guard drop.
 
 ## Runtime gate
 
@@ -153,6 +153,29 @@ With pipeline level `info`, a stdout sink at `info`, and `TracingConfig::level` 
 ### Zero ratio exports no root spans
 
 With `sample_ratio` 0 the HTTP mock never receives the root span `root-span`. A span whose parent is a sampled remote span context arrives, so spans do reach the mock under this sampler.
+
+## Trace context propagation
+
+The string API carries W3C trace context in and out of a span without any `opentelemetry` type. The tests share one pipeline per process with `sample_ratio` 0.
+
+### Remote parent round trips and overrides zero ratio
+
+Header `TraceParent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01` (mixed case) on a new span, then `trace_headers`: `set_parent_from_headers` returns `Ok`.
+
+The written `traceparent` keeps the remote trace id, has a new span id, and ends in `-01` although the ratio is 0, because the sampler follows a sampled parent.
+
+### Set parent after headers returns already started
+
+`trace_headers` on a span starts its OTel context, so a following `set_parent_from_headers` returns `PropagationError::AlreadyStarted`.
+
+### Headers without traceparent keep the local parent
+
+A child created inside a local span, given headers with no `traceparent`, gets `Ok` and keeps the local parent's trace id.
+
+### Set parent without tracing returns no OTel layer
+
+In a logging-only pipeline, `set_parent_from_headers` with a valid `traceparent` returns `PropagationError::NoOtelLayer`.
+
 
 ## Config files
 
