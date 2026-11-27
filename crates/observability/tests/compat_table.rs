@@ -1,14 +1,15 @@
-//! The README `## Compatibility` table checked against `Cargo.lock` and the manifests.
+//! The README `## Compatibility` table checked against `Cargo.lock` and the workspace manifest.
 //!
 //! The newest row describes the newest or the upcoming release, so it must match what the repo
-//! builds today, and it must not be older than this crate's version.
+//! builds today, and it must not be older than this crate's version. The `observability-core`
+//! cell is not checked: core releases on its own, so after a core-only release the core
+//! manifest no longer matches the row of the last `observability` tag.
 
 use std::collections::BTreeSet;
 
 const README: &str = include_str!("../../../README.md");
 const LOCK: &str = include_str!("../../../Cargo.lock");
 const WORKSPACE_MANIFEST: &str = include_str!("../../../Cargo.toml");
-const CORE_MANIFEST: &str = include_str!("../../observability-core/Cargo.toml");
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const COLUMNS: [&str; 10] = [
@@ -100,17 +101,11 @@ fn locked_cell(parts: &[&[&str]]) -> String {
         .join(" / ")
 }
 
-/// The first `key = "value"` line, which for `version` and `rust-version` is the package or
-/// workspace one: dependency versions sit in inline tables.
-fn manifest_value<'a>(manifest: &'a str, key: &str) -> &'a str {
-    manifest
+fn workspace_rust_version() -> &'static str {
+    WORKSPACE_MANIFEST
         .lines()
-        .find_map(|line| {
-            line.strip_prefix(key)?
-                .strip_prefix(" = \"")?
-                .strip_suffix('"')
-        })
-        .unwrap_or_else(|| panic!("no `{key}` line in the manifest"))
+        .find_map(|line| line.strip_prefix("rust-version = \"")?.strip_suffix('"'))
+        .expect("the workspace Cargo.toml sets rust-version")
 }
 
 /// The table's lines as trimmed cells: header, separator, then one row per tag.
@@ -167,7 +162,7 @@ fn newest_readme_row_matches_lockfile() {
         (OTEL_BRIDGE, otel_bridge, "Cargo.lock"),
         (
             "MSRV",
-            manifest_value(WORKSPACE_MANIFEST, "rust-version").to_owned(),
+            workspace_rust_version().to_owned(),
             "Cargo.toml rust-version",
         ),
     ];
@@ -176,15 +171,6 @@ fn newest_readme_row_matches_lockfile() {
             .iter()
             .map(|(column, parts)| (*column, locked_cell(parts), "Cargo.lock")),
     );
-    // Before a release the newest row names the upcoming tag, but the core version moves only
-    // in the release pull request, so the core cell is checked from that pull request on.
-    if tag_version(row) == CRATE_VERSION {
-        expected.push((
-            "observability-core",
-            manifest_value(CORE_MANIFEST, "version").to_owned(),
-            "the observability-core Cargo.toml",
-        ));
-    }
 
     let mismatches: Vec<String> = expected
         .iter()
