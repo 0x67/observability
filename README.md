@@ -128,6 +128,50 @@ handed off, and the first drain after a thread exits frees that thread's slot.
 
 See [`lat.md/lat.md`](lat.md/lat.md) for the full design intent and the per-subsystem rationale.
 
+## Operational notes
+
+1. Keep one copy of `observability-core` in the build. An app that pins `observability` and
+   `observability-core` to different tags gets two copies of the repository, and each copy of
+   the core has its own metrics gate. `init_metrics` turns on the gate in the copy `observability`
+   was built with. Code built against the other copy still sees `metrics_enabled()` return
+   `false`, so its `count_msg` and `record_latency_ns` calls don't record anything, and no error
+   says why. To check a build:
+
+   ```bash
+   cargo tree -i observability-core
+   ```
+
+   With one copy, Cargo prints the crate and what depends on it. With two, it stops with
+   ``specification `observability-core` is ambiguous`` and lists both versions. Pin both crates
+   to the same tag, as the [Quickstart](#quickstart) says.
+
+2. A full `init` starts these threads, named as below:
+
+   | Thread | Count | Started for |
+   | --- | --- | --- |
+   | `tracing-appender` | one per stdout or rolling-file sink | the non-blocking log writer |
+   | `OpenTelemetry.Traces.BatchProcessor` | 1 | tracing |
+   | `OpenTelemetry.Logs.BatchProcessor` | 1 | an OTLP log sink |
+   | `OpenTelemetry.Metrics.PeriodicReader` | 1 | OTLP metrics |
+   | `observability-otlp` | 1, shared by every OTLP exporter on both transports | the crate's export runtime |
+   | `metrics-exporter-prometheus-http-listener` | 1 | Prometheus metrics, when no tokio runtime is current at `init`; inside one, the listener runs on the app's runtime |
+
+   Measured on 0.3.0 on macOS, from a plain `fn main()` with no tokio runtime: stdout,
+   rolling-file, and OTLP log sinks, tracing, and OTLP metrics over HTTP/protobuf to
+   `http://127.0.0.1:4318` took the process from 1 thread to 7. Prometheus metrics instead of
+   OTLP metrics gave the same total, with the listener in place of the periodic reader. With
+   `http://localhost:4318`, a second `observability-otlp` thread appeared: tokio's blocking pool
+   runs the host name lookup and stops an idle pool thread after 10 s. On Linux,
+   `ls /proc/<pid>/task | wc -l` counts a process's threads and `cat /proc/<pid>/task/*/comm`
+   names them, cut to 15 bytes (`OpenTelemetry.T`).
+
+3. `std::process::exit` skips `Drop` on `ObsGuard`, and so does a panic in a binary built with
+   `panic = "abort"`. Anything still inside the process is then lost: log lines queued for a
+   writer, span and log batches not yet exported, and the last OTLP metrics interval. Return
+   from `main` instead, with `std::process::ExitCode` if the exit code matters, or call
+   `drop(guard)` before `exit`. Tauri apps drop the guard in their `RunEvent::Exit` handler (see
+   the [`observability` crate README](crates/observability#two-subsystems-one-coupling)).
+
 ## Feature model
 
 All heavy backends are feature-gated on the `observability` crate, default-on. `otel` is the
