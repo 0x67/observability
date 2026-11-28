@@ -128,6 +128,119 @@ handed off, and the first drain after a thread exits frees that thread's slot.
 
 See [`lat.md/lat.md`](lat.md/lat.md) for the full design intent and the per-subsystem rationale.
 
+## Operational notes
+
+1. Keep one copy of `observability-core` in the build. An app that pins `observability` and
+   `observability-core` to different tags gets two copies of the repository, and each copy of
+   the core has its own metrics gate. `init_metrics` turns on the gate in the copy `observability`
+   was built with. Code built against the other copy still sees `metrics_enabled()` return
+   `false`, so its `count_msg` and `record_latency_ns` calls don't record anything, and no error
+   says why. To check a build:
+
+   ```bash
+   cargo tree -i observability-core
+   ```
+
+   With one copy, Cargo prints the crate and what depends on it. With two, it stops with
+   ``specification `observability-core` is ambiguous`` and lists both versions. Pin both crates
+   to the same tag, as the [Quickstart](#quickstart) says.
+
+2. A full `init` starts these threads, named as below:
+
+   | Thread | Count | Started for |
+   | --- | --- | --- |
+   | `tracing-appender` | one per stdout or rolling-file sink | the non-blocking log writer |
+   | `OpenTelemetry.Traces.BatchProcessor` | 1 | tracing |
+   | `OpenTelemetry.Logs.BatchProcessor` | 1 | an OTLP log sink |
+   | `OpenTelemetry.Metrics.PeriodicReader` | 1 | OTLP metrics |
+   | `observability-otlp` | 1, shared by every OTLP exporter on both transports | the crate's export runtime |
+   | `metrics-exporter-prometheus-http-listener` | 1 | Prometheus metrics, when no tokio runtime is current at `init`; inside one, the listener runs on the app's runtime |
+
+   Measured on 0.3.0 on macOS, from a plain `fn main()` with no tokio runtime: stdout,
+   rolling-file, and OTLP log sinks, tracing, and OTLP metrics over HTTP/protobuf to
+   `http://127.0.0.1:4318` took the process from 1 thread to 7. Prometheus metrics instead of
+   OTLP metrics gave the same total, with the listener in place of the periodic reader. With
+   `http://localhost:4318`, a second `observability-otlp` thread appeared: tokio's blocking pool
+   runs the host name lookup and stops an idle pool thread after 10 s. On Linux,
+   `ls /proc/<pid>/task | wc -l` counts a process's threads and `cat /proc/<pid>/task/*/comm`
+   names them, cut to 15 bytes (`OpenTelemetry.T`).
+
+3. `std::process::exit` skips `Drop` on `ObsGuard`, and so does a panic in a binary built with
+   `panic = "abort"`. Anything still inside the process is then lost: log lines queued for a
+   writer, span and log batches not yet exported, and the last OTLP metrics interval. Return
+   from `main` instead, with `std::process::ExitCode` if the exit code matters, or call
+   `drop(guard)` before `exit`. Tauri apps drop the guard in their `RunEvent::Exit` handler (see
+   the [`observability` crate README](crates/observability#two-subsystems-one-coupling)).
+
+4. A collector or backend outage costs each signal something different:
+
+   | Signal | Path | During the outage | After it ends |
+   | --- | --- | --- | --- |
+   | Metrics | Prometheus pull | The recorder keeps running totals in the process; a missed scrape loses resolution only | The next scrape returns the full totals |
+   | Metrics | OTLP push | A failed export is retried, then dropped. Counters and histograms carry cumulative totals, the SDK default `Temporality::Cumulative` | The next export that succeeds carries the totals; gauge values between exports are gone |
+   | Traces | OTLP | Spans wait in the batch queue, `TracingConfig::batch` (2,048 spans by default). A failed export is retried, then its batch is dropped and counted in `observability.dropped` | Spans dropped during the outage are gone |
+   | Logs | OTLP sink | The same, with `LoggingConfig::otlp_batch` | Records dropped during the outage are gone |
+   | Logs | Rolling file | Lines stay on disk. The writer drops a line only when its `LineQueue` is full | A collector `filelog` receiver reads the backlog from its stored offset |
+   | Logs | Stdout | What the container runtime's log driver keeps | Depends on the log driver |
+
+   The crate README's [Shared OTLP](crates/observability#shared-otlp) section has the retry
+   policy, and [Delivery limits](crates/observability#delivery-limits) has the queue settings
+   and the drop counts.
+
+   For delivery across an outage, run an OTel Collector agent next to the service and point the
+   crate at it. [`docs/otel-collector-agent.yaml`](docs/otel-collector-agent.yaml) keeps the
+   exporter queue and the `filelog` offsets on disk through the `file_storage` extension, and
+   retries failed exports:
+
+   ```yaml
+   # A collector agent next to the service: it keeps the export queue and the log file offsets on
+   # disk, so queued data survives a backend outage and an agent restart.
+   # Send logs one way: the OTLP log sink, or a rolling-file sink that filelog reads. With both,
+   # every line arrives twice.
+   extensions:
+     file_storage:
+       directory: /var/lib/otelcol/file_storage
+       create_directory: true
+
+   receivers:
+     otlp:
+       protocols:
+         grpc:
+           endpoint: 127.0.0.1:4317
+         http:
+           endpoint: 127.0.0.1:4318
+     # the rolling-file sink's `dir` and `prefix`; its files are named `<prefix>.<date>`
+     filelog:
+       include: [/var/log/my-service/app*]
+       # read what the sink wrote before the agent's first start; after that the stored offsets apply
+       start_at: beginning
+       storage: file_storage
+       operators:
+         - type: json_parser
+
+   exporters:
+     otlp:
+       endpoint: backend.example.com:4317
+       sending_queue:
+         enabled: true
+         storage: file_storage
+       retry_on_failure:
+         enabled: true
+
+   service:
+     extensions: [file_storage]
+     pipelines:
+       traces:
+         receivers: [otlp]
+         exporters: [otlp]
+       metrics:
+         receivers: [otlp]
+         exporters: [otlp]
+       logs:
+         receivers: [otlp, filelog]
+         exporters: [otlp]
+   ```
+
 ## Feature model
 
 All heavy backends are feature-gated on the `observability` crate, default-on. `otel` is the

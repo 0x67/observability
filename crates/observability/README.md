@@ -218,8 +218,9 @@ values the application records.
       replaces email addresses in log bodies with `[EMAIL]`.
 
    `redaction` is first in each pipeline, and `attributes/scrub` and `transform/scrub` see the
-   masked values. Use the file as is, or copy its processors into the collector config you
-   already run.
+   masked values. Use the file as is, or copy its processors, in the same pipeline order, into
+   the collector config you already run, such as the agent config in
+   [`docs/otel-collector-agent.yaml`](../../docs/otel-collector-agent.yaml).
 
 4. Collector-side scrubbing runs after the data leaves the process, so unscrubbed values are sent
    over the OTLP connection to the collector. The default `tls` feature encrypts that connection

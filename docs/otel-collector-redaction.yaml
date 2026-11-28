@@ -1,5 +1,6 @@
 # Scrubs span and log attributes, and email addresses in log bodies, before export.
-# Run it as is, or copy the processors into the collector config you already run.
+# Run it as is, or copy the processors, in the same pipeline order, into the collector config
+# you already run, such as docs/otel-collector-agent.yaml.
 receivers:
   otlp:
     protocols:

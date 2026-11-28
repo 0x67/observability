@@ -100,6 +100,8 @@ The SDK drops on a full channel with only a log line, so the bounded processor d
 
 The OTLP log sink has the same chain, [[crates/observability/src/pipeline/bounded/logs.rs#BoundedLogProcessor]] in front of `BatchLogProcessor`, bounded by `LoggingConfig::otlp_batch`, whose default delay is 1 s, the SDK log default. `OTEL_BLRP_*` is not read either. The log exporter counts a batch with `batch.iter().count()`, since `LogBatch` has no `len()`.
 
+The crate doesn't spool to disk or retry beyond the exporter's default policy, so a batch that still fails after that policy is lost. Delivery across a collector or backend outage is left to a collector agent next to the service: `docs/otel-collector-agent.yaml` keeps the agent's export queue and its `filelog` offsets on disk, and the `## Operational notes` section of [[README.md]] shows what an outage costs each signal.
+
 ## Trace context propagation
 
 With tracing on, a successful [[crates/observability/src/pipeline/mod.rs#init_pipeline]] sets the W3C `TraceContextPropagator` as the process-wide OTel text map propagator, so OTel-aware HTTP and gRPC middleware works without setup.
