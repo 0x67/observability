@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/0x67/observability/compare/observability-v0.3.0...observability-v0.3.1) (2026-11-28)
+
+
+### Documentation
+
+* **readme:** add operational notes and outage guidance ([#85](https://github.com/0x67/observability/issues/85)) ([4123114](https://github.com/0x67/observability/commit/4123114e0dcd557781b8627ebb56f0d1bb55bb3d))
+
+
+### Tests
+
+* **observability:** stop checking the core cell in the compat table ([#83](https://github.com/0x67/observability/issues/83)) ([0d13faa](https://github.com/0x67/observability/commit/0d13faa01e6b54788a2a7b23b88ffe07863dd92f))
+
 ## [0.3.0](https://github.com/0x67/observability/compare/observability-v0.2.2...observability-v0.3.0) (2026-11-27)
 
 
